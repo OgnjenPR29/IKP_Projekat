@@ -16,6 +16,7 @@ struct client {
 
 };
 
+//izmena
 struct message {
 
     bool direktna;
