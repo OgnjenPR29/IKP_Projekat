@@ -7,21 +7,32 @@
 #define DEFAULT_BUFLEN 512
 #define DEFAULT_PORT "27016"
 #define BUFFER_SIZE 1024
+#define MAX_CLIENTS 1000
 
 bool InitializeWindowsSockets();
 
 struct client {
     SOCKET socket;
-    char* ime;
+    int port;
+    char ip[INET_ADDRSTRLEN];
+    char ime[20];
 
 };
 
-//izmena
+typedef struct {
+    SOCKET socket;
+    int port;
+    char ip[INET_ADDRSTRLEN];
+} ThreadArgs;
+
+struct client clients[MAX_CLIENTS];
+int num_clients = 0;
+
 struct message {
 
     bool direktna;
-    char* ime;
-    char* tekst;
+    char ime[20];
+    char tekst[250];
 
 };
 
@@ -33,8 +44,15 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
 
     struct client klijent;
     struct message poruka;
-    char recvbuf[1024];
-    SOCKET clientSocket = (SOCKET)lpParam;
+    char recvbuf[20];
+    
+    ThreadArgs* argumenti = (ThreadArgs*)lpParam;
+
+    SOCKET clientSocket = argumenti->socket;
+    char* ip = argumenti->ip;
+    int port = argumenti->port;
+    char p[5];
+    itoa(port, p, 10);
 
     if (flag == 0) {
 
@@ -58,15 +76,18 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
         }
 
         flag++;
-        klijent.ime = recvbuf;
+        memcpy(klijent.ime, recvbuf, 20);
         klijent.socket = clientSocket;
+        memcpy(klijent.ip, ip, INET_ADDRSTRLEN);
+        klijent.port = port;
         
-        //skladisti se klijent negde
+        clients[num_clients++] = klijent;
 
     }
     else {
         while (1) {
             int iResult = recv(clientSocket, (char*)&poruka, sizeof(struct message), 0);
+            char odgovor[25];
 
             if (iResult > 0)
             {
@@ -87,6 +108,15 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
 
             if (poruka.direktna) {
                 //kod koji salje soket
+                size_t arrayLength = sizeof(clients) / sizeof(clients[0]);
+                    for(int i = 0; i < arrayLength; i++) {
+                        if (clients[i].ime == poruka.ime) {
+                            strcpy(odgovor, clients[i].ip);
+                            strcpy(odgovor, "   ");
+                            strcpy(odgovor, p);
+                        
+                        }
+                    }
             }
             else {
                 //kod koji prosledjuje poruku
@@ -184,8 +214,24 @@ int  main(void)
     {
         // Prihvatanje konekcije od klijenta
         //addrLen = sizeof(clientAddr);
-        //clientSocket = accept(listenSocket, (SOCKADDR*)&clientAddr, &addrLen);
-        clientSocket = accept(listenSocket, NULL, NULL);//soket od klijenta koji se trenutno konektovao
+
+        struct sockaddr_in clientAddress;
+        socklen_t addressLength = sizeof(clientAddress);
+
+        struct sockaddr_in localAddress;
+        addressLength = sizeof(localAddress);
+        getsockname(clientSocket, (struct sockaddr*)&localAddress, &addressLength);
+
+        char ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &localAddress.sin_addr, ip, INET_ADDRSTRLEN);
+        int port = ntohs(localAddress.sin_port);
+
+        clientSocket = accept(listenSocket, (struct sockaddr*)&clientAddress, &addressLength);
+
+        ThreadArgs argumenti;
+        memcpy(argumenti.ip, ip, INET_ADDRSTRLEN);
+        argumenti.port = port;
+        argumenti.socket = clientSocket;
 
         if (clientSocket == INVALID_SOCKET)
         {
@@ -196,7 +242,7 @@ int  main(void)
         }
 
         // Kreiranje novog thread-a za obradu zahteva od klijenta
-        HANDLE clientThread = CreateThread(NULL, 0, clientHandler, (LPVOID)clientSocket, 0, &threadId);
+        HANDLE clientThread = CreateThread(NULL, 0, clientHandler, &argumenti, 0, &threadId);
        
         if (clientThread == NULL)
         {
@@ -225,9 +271,9 @@ int  main(void)
             closesocket(listenSocket);
             WSACleanup();
             return 1;
-        }*/
+        }
 
-   /*     do
+       do
         {
             // Receive data until the client shuts down the connection
             iResult = recv(acceptedSocket, recvbuf, DEFAULT_BUFLEN, 0);
@@ -255,7 +301,7 @@ int  main(void)
 
     // shutdown the connection since we're done
 
-    iResult = shutdown(clientSocket, SD_SEND);
+   int iResult = shutdown(clientSocket, SD_SEND);
     if (iResult == SOCKET_ERROR)
     {
         printf("shutdown failed with error: %d\n", WSAGetLastError());
