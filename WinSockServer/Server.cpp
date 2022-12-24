@@ -19,14 +19,15 @@ struct client {
 
 };
 
+struct client clients[MAX_CLIENTS];
+int num_clients = 0;
+
 typedef struct {
     SOCKET socket;
     int port;
     char ip[INET_ADDRSTRLEN];
 } ThreadArgs;
 
-struct client clients[MAX_CLIENTS];
-int num_clients = 0;
 
 struct message {
 
@@ -41,57 +42,62 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
     // Ovde se obrađuju zahtevi od klijenta
 
     int flag = 0;
+    int send_bytes;
 
     struct client klijent;
     struct message poruka;
-    char recvbuf[20];
-    
     ThreadArgs* argumenti = (ThreadArgs*)lpParam;
+
+    char rb[1024];
+    char p[10];
 
     SOCKET clientSocket = argumenti->socket;
     char* ip = argumenti->ip;
     int port = argumenti->port;
-    char p[5];
     itoa(port, p, 10);
 
-    if (flag == 0) {
+    while (flag == 0) {
 
-        int iResult = recv(clientSocket, recvbuf, DEFAULT_BUFLEN, 0);
+        int iResult = recv(clientSocket, rb, DEFAULT_BUFLEN, 0);
 
         if (iResult > 0)
         {
-            printf("Message received from client: %s.\n", recvbuf);
+            printf("Registrovan client: %s.\n", rb);
         }
         else if (iResult == 0)
         {
-            // connection was closed gracefully
             printf("Connection with client closed.\n");
             closesocket(clientSocket);
         }
         else
         {
-            // there was an error during recv
             printf("recv failed with error: %d\n", WSAGetLastError());
             closesocket(clientSocket);
         }
 
         flag++;
-        memcpy(klijent.ime, recvbuf, 20);
+
+        strcpy(klijent.ime, rb);
         klijent.socket = clientSocket;
         memcpy(klijent.ip, ip, INET_ADDRSTRLEN);
         klijent.port = port;
         
+        printf("Ovde je upisan klijent %s %s %d\n", klijent.ime, klijent.ip, klijent.port);
+
         clients[num_clients++] = klijent;
 
     }
-    else {
         while (1) {
+
             int iResult = recv(clientSocket, (char*)&poruka, sizeof(struct message), 0);
-            char odgovor[25];
+            char odgovor[50];
+            memset(odgovor, 0, sizeof(odgovor));
+
+            printf("Ovo je server primio: %d %s %s\n",poruka.direktna, poruka.ime, poruka.tekst);
 
             if (iResult > 0)
             {
-                printf("Message received from client: %s.\n", recvbuf);
+                printf("Message received from client: %s.\n", rb);
             }
             else if (iResult == 0)
             {
@@ -109,12 +115,38 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
             if (poruka.direktna) {
                 //kod koji salje soket
                 size_t arrayLength = sizeof(clients) / sizeof(clients[0]);
+                printf("velicina niza %d\n", arrayLength);
+
+
                     for(int i = 0; i < arrayLength; i++) {
-                        if (clients[i].ime == poruka.ime) {
-                            strcpy(odgovor, clients[i].ip);
-                            strcpy(odgovor, "   ");
-                            strcpy(odgovor, p);
-                        
+                
+                        printf("Klijent sa imenom '%s' i klijent iz poruke '%s'\n", clients[i].ime, poruka.ime);
+
+                        if (strcmp(clients[i].ime,poruka.ime) == 0) {
+                            //printf("usao gde treba");
+                            strcat(odgovor, clients[i].ip);
+                            strcat(odgovor, "   ");
+                            strcat(odgovor, p);
+                           
+                            printf("Ovaj odgovor server salje: %s", odgovor);
+
+                            if ((send_bytes = send(clientSocket, odgovor, (int)strlen(odgovor) + 1, 0)) == -1) {
+                                perror("send");
+                                return 1;
+                            }
+                            memset(odgovor, 0, sizeof(odgovor));
+
+                            break;
+                        }
+                        else {
+                            strcpy(odgovor, "Ne postoji korisnik sa takvim imenom");
+                            if ((send_bytes = send(clientSocket, odgovor, (int)strlen(odgovor) + 1, 0)) == -1) {
+                                perror("send");
+                                return 1;
+                            }
+                            memset(odgovor, 0, sizeof(odgovor));
+
+                            break;
                         }
                     }
             }
@@ -123,7 +155,7 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
             }
         }
 
-    }
+    
 
 
     return 0;
@@ -182,8 +214,7 @@ int  main(void)
         return 1;
     }
 
-    // Setup the TCP listening socket - bind port number and local address 
-    // to socket
+    // Setup the TCP listening socket - bind port number and local address to socket
     iResult = bind( listenSocket, resultingAddress->ai_addr, (int)resultingAddress->ai_addrlen);
     if (iResult == SOCKET_ERROR)
     {
@@ -197,8 +228,8 @@ int  main(void)
     // Since we don't need resultingAddress any more, free it
     freeaddrinfo(resultingAddress);
 
-    // Set listenSocket in listening mode
     iResult = listen(listenSocket, SOMAXCONN);
+
     if (iResult == SOCKET_ERROR)
     {
         printf("listen failed with error: %d\n", WSAGetLastError());
@@ -212,11 +243,10 @@ int  main(void)
 
     while (1)
     {
-        // Prihvatanje konekcije od klijenta
-        //addrLen = sizeof(clientAddr);
-
         struct sockaddr_in clientAddress;
         socklen_t addressLength = sizeof(clientAddress);
+
+        clientSocket = accept(listenSocket, (struct sockaddr*)&clientAddress, &addressLength);
 
         struct sockaddr_in localAddress;
         addressLength = sizeof(localAddress);
@@ -226,7 +256,7 @@ int  main(void)
         inet_ntop(AF_INET, &localAddress.sin_addr, ip, INET_ADDRSTRLEN);
         int port = ntohs(localAddress.sin_port);
 
-        clientSocket = accept(listenSocket, (struct sockaddr*)&clientAddress, &addressLength);
+        printf("%s %d \n", ip, port);
 
         ThreadArgs argumenti;
         memcpy(argumenti.ip, ip, INET_ADDRSTRLEN);
@@ -301,16 +331,15 @@ int  main(void)
 
     // shutdown the connection since we're done
 
-   int iResult = shutdown(clientSocket, SD_SEND);
+   /*int iResult = shutdown(clientSocket, SD_SEND);
     if (iResult == SOCKET_ERROR)
     {
         printf("shutdown failed with error: %d\n", WSAGetLastError());
         closesocket(clientSocket);
         WSACleanup();
         return 1;
-    }
+    }*/
 
-    // cleanup
     closesocket(listenSocket);
     closesocket(clientSocket);
     WSACleanup();
@@ -321,7 +350,7 @@ int  main(void)
 bool InitializeWindowsSockets()
 {
     WSADATA wsaData;
-	// Initialize windows sockets library for this process
+
     if (WSAStartup(MAKEWORD(2,2), &wsaData) != 0)
     {
         printf("WSAStartup failed with error: %d\n", WSAGetLastError());

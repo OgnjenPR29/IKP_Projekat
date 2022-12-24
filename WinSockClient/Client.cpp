@@ -10,36 +10,26 @@
 #define DEFAULT_BUFLEN 512
 #define DEFAULT_PORT 27016
 
-// Initializes WinSock2 library
-// Returns true if succeeded, false otherwise.
 bool InitializeWindowsSockets();
 
 struct message {
     
     bool direktna;
-    char* ime;
-    char* tekst;
+    char ime[20];
+    char tekst[250];
 
 };
 
 int __cdecl main() 
 {
-    // socket used to communicate with server
     SOCKET connectSocket = INVALID_SOCKET;
-    // variable used to store function return value
     int iResult;
-    // message to send
     printf("Unesite ime za registraciju: ");
-
     char messageToSend[20];
-    fgets(messageToSend, 20, stdin);
-    
-    // Validate the parameters
+    scanf(" %s", messageToSend);
 
     if(InitializeWindowsSockets() == false)
     {
-		// we won't log anything since it will be logged
-		// by InitializeWindowsSockets() function
 		return 1;
     }
 
@@ -82,11 +72,12 @@ int __cdecl main()
     }
 
     printf("Bytes Sent: %ld\n", iResult);
-    //getch();
 
     while (true) {
 
+        int recv_bytes;
         bool direktno;
+        char buff[1024];
         char pomocna;
         char str1[20];
         char str2[250];
@@ -110,23 +101,30 @@ int __cdecl main()
         }
 
         printf("Unesite ime klijenta sa kim zelite da komunicirate: ");
-        fgets(str1, 20, stdin);
+        scanf(" %s", str1);
+        printf("%s\n", str1);
+
 
         if (direktno == 1) {
             strcpy(str2,"Posalji mi soket");
+            printf("%s\n", str2);
         }
         else {
             printf("Unesite tekst poruke: ");
-            fgets(str2, 250, stdin);
+            scanf(" %s", str2);
+            printf("%s\n", str2);
+
         }
 
         struct message poruka;
         poruka.direktna = direktno;
-        poruka.ime = str1;
-        poruka.tekst = str2;
+        strcpy(poruka.ime,str1);
+        strcpy(poruka.tekst,str2);
 
         iResult = send(connectSocket, (const char*)&poruka, sizeof(poruka), 0);
-        
+        printf("Prosao je send poruke\n");
+
+
         if (iResult == SOCKET_ERROR)
         {
             printf("send failed with error: %d\n", WSAGetLastError());
@@ -136,9 +134,20 @@ int __cdecl main()
         }
 
         printf("Bytes Sent: %ld\n", iResult);
+
+        if ((recv_bytes = recv(connectSocket, buff, 512, 0)) == -1) {
+            perror("recv");
+            return 1;
+        }
+        buff[recv_bytes] = '\0';
+
+        //recv_bytes = recv(connectSocket, buff, 512, 0);
+
+        printf("Received: %s\n", buff);
+
+
     }
 
-    // cleanup
     closesocket(connectSocket);
     WSACleanup();
 
@@ -148,7 +157,7 @@ int __cdecl main()
 bool InitializeWindowsSockets()
 {
     WSADATA wsaData;
-	// Initialize windows sockets library for this process
+
     if (WSAStartup(MAKEWORD(2,2), &wsaData) != 0)
     {
         printf("WSAStartup failed with error: %d\n", WSAGetLastError());
