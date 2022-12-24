@@ -50,11 +50,11 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
 
     char rb[1024];
     char p[10];
+    char currIme[20];
 
     SOCKET clientSocket = argumenti->socket;
     char* ip = argumenti->ip;
     int port = argumenti->port;
-    itoa(port, p, 10);
 
     while (flag == 0) {
 
@@ -78,10 +78,13 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
         flag++;
 
         strcpy(klijent.ime, rb);
+        strcpy(currIme, rb);
         klijent.socket = clientSocket;
         memcpy(klijent.ip, ip, INET_ADDRSTRLEN);
         klijent.port = port;
-        
+        //printf("A i ovo je soket od klijenta: %u\n", clientSocket);
+        //printf("Ovo takodje je soket od klijenta: %u\n", klijent.socket);
+
         printf("Ovde je upisan klijent %s %s %d\n", klijent.ime, klijent.ip, klijent.port);
 
         clients[num_clients++] = klijent;
@@ -93,7 +96,7 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
             char odgovor[50];
             memset(odgovor, 0, sizeof(odgovor));
 
-            printf("Ovo je server primio: %d %s %s\n",poruka.direktna, poruka.ime, poruka.tekst);
+            printf("\nOvo je server primio: %d %s %s\n",poruka.direktna, poruka.ime, poruka.tekst);
 
             if (iResult > 0)
             {
@@ -124,6 +127,9 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
 
                         if (strcmp(clients[i].ime,poruka.ime) == 0) {
                             //printf("usao gde treba");
+                            itoa(clients[i].port, p, 10);
+
+                            strcat(odgovor, "D ");
                             strcat(odgovor, clients[i].ip);
                             strcat(odgovor, "   ");
                             strcat(odgovor, p);
@@ -138,7 +144,7 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
 
                             break;
                         }
-                        else {
+                        if(i == (int)(arrayLength) - 1) {
                             strcpy(odgovor, "Ne postoji korisnik sa takvim imenom");
                             if ((send_bytes = send(clientSocket, odgovor, (int)strlen(odgovor) + 1, 0)) == -1) {
                                 perror("send");
@@ -152,6 +158,41 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
             }
             else {
                 //kod koji prosledjuje poruku
+                size_t arrayLength = sizeof(clients) / sizeof(clients[0]);
+
+                for (int i = 0; i < arrayLength; i++) {
+                 
+                    if (strcmp(clients[i].ime, poruka.ime) == 0) {
+
+                        strcat(odgovor, "P Klijent ");
+                        strcat(odgovor, currIme);//registrovano ime
+                        strcat(odgovor, " salje poruku: ");
+                        strcat(odgovor, poruka.tekst);
+
+                        printf("\nOvaj odgovor server salje: %s", odgovor);
+
+                        if ((send_bytes = send(clients[i].socket, odgovor, (int)strlen(odgovor) + 1, 0)) == -1) {
+                            perror("send");
+                            return 1;
+                        }
+                        memset(odgovor, 0, sizeof(odgovor));
+
+                        break;
+
+                    }
+                    if(i == (int)(arrayLength) - 1)
+                    {
+                        strcpy(odgovor, "Ne postoji taj klijent");
+                        if ((send_bytes = send(clientSocket, odgovor, (int)strlen(odgovor) + 1, 0)) == -1) {
+                            perror("send");
+                            return 1;
+                        }
+                        memset(odgovor, 0, sizeof(odgovor));
+
+                        break;
+                    }
+                }
+
             }
         }
 
@@ -248,9 +289,11 @@ int  main(void)
 
         clientSocket = accept(listenSocket, (struct sockaddr*)&clientAddress, &addressLength);
 
+        //printf("Ovo je soket od klijenta: %u\n",clientSocket);
+
         struct sockaddr_in localAddress;
         addressLength = sizeof(localAddress);
-        getsockname(clientSocket, (struct sockaddr*)&localAddress, &addressLength);
+        getpeername(clientSocket, (struct sockaddr*)&localAddress, &addressLength);
 
         char ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &localAddress.sin_addr, ip, INET_ADDRSTRLEN);
