@@ -45,11 +45,21 @@ int __cdecl main()
         return 1;
     }
 
+    /*int random_number = rand() % 100 + 1;
+
+    sockaddr_in clientAddress;
+    clientAddress.sin_family = AF_INET;
+    //clientAddress.sin_addr.s_addr = inet_addr("127.0.0.1");
+    clientAddress.sin_port = htons(27017 + random_number);
+
+    bind(connectSocket, (SOCKADDR*)&clientAddress, sizeof(clientAddress));*/
+
     // create and initialize address structure
     sockaddr_in serverAddress;
     serverAddress.sin_family = AF_INET;
     serverAddress.sin_addr.s_addr = inet_addr("127.0.0.1");
     serverAddress.sin_port = htons(DEFAULT_PORT);
+
 
     // connect to server specified in serverAddress and socket connectSocket
     if (connect(connectSocket, (SOCKADDR*)&serverAddress, sizeof(serverAddress)) == SOCKET_ERROR)
