@@ -82,8 +82,6 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
         klijent.socket = clientSocket;
         memcpy(klijent.ip, ip, INET_ADDRSTRLEN);
         klijent.port = port;
-        //printf("A i ovo je soket od klijenta: %u\n", clientSocket);
-        //printf("Ovo takodje je soket od klijenta: %u\n", klijent.socket);
 
         printf("Ovde je upisan klijent %s %s %d\n", klijent.ime, klijent.ip, klijent.port);
 
@@ -113,48 +111,45 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
                 // there was an error during recv
                 printf("recv failed with error: %d\n", WSAGetLastError());
                 closesocket(clientSocket);
+                return 1;
             }
 
             if (poruka.direktna) {
                 //kod koji salje soket
                 size_t arrayLength = sizeof(clients) / sizeof(clients[0]);
-                printf("velicina niza %d\n", arrayLength);
 
+                for(int i = 0; i < arrayLength; i++) {
 
-                    for(int i = 0; i < arrayLength; i++) {
-                
-                        printf("Klijent sa imenom '%s' i klijent iz poruke '%s'\n", clients[i].ime, poruka.ime);
+                    if (strcmp(clients[i].ime,poruka.ime) == 0) {
 
-                        if (strcmp(clients[i].ime,poruka.ime) == 0) {
-                            //printf("usao gde treba");
-                            itoa(clients[i].port, p, 10);
+                        itoa(clients[i].port, p, 10);
 
-                            strcat(odgovor, "D ");
-                            strcat(odgovor, clients[i].ip);
-                            strcat(odgovor, "   ");
-                            strcat(odgovor, p);
+                        strcat(odgovor, "D ");
+                        strcat(odgovor, clients[i].ip);
+                        strcat(odgovor, "   ");
+                        strcat(odgovor, p);
                            
-                            printf("Ovaj odgovor server salje: %s", odgovor);
+                        printf("Ovaj odgovor server salje: %s", odgovor);
 
-                            if ((send_bytes = send(clientSocket, odgovor, (int)strlen(odgovor) + 1, 0)) == -1) {
-                                perror("send");
-                                return 1;
-                            }
-                            memset(odgovor, 0, sizeof(odgovor));
-
-                            break;
+                        if ((send_bytes = send(clientSocket, odgovor, (int)strlen(odgovor) + 1, 0)) == -1) {
+                            perror("send");
+                            return 1;
                         }
-                        if(i == (int)(arrayLength) - 1) {
-                            strcpy(odgovor, "Ne postoji korisnik sa takvim imenom");
-                            if ((send_bytes = send(clientSocket, odgovor, (int)strlen(odgovor) + 1, 0)) == -1) {
-                                perror("send");
-                                return 1;
-                            }
-                            memset(odgovor, 0, sizeof(odgovor));
+                        memset(odgovor, 0, sizeof(odgovor));
 
-                            break;
-                        }
+                        break;
                     }
+                    if(i == (int)(arrayLength) - 1) {
+                        strcpy(odgovor, "Ne postoji korisnik sa takvim imenom");
+                        if ((send_bytes = send(clientSocket, odgovor, (int)strlen(odgovor) + 1, 0)) == -1) {
+                            perror("send");
+                            return 1;
+                        }
+                        memset(odgovor, 0, sizeof(odgovor));
+
+                        break;
+                    }
+                }
             }
             else {
                 //kod koji prosledjuje poruku
@@ -374,14 +369,14 @@ int  main(void)
 
     // shutdown the connection since we're done
 
-   /*int iResult = shutdown(clientSocket, SD_SEND);
+    iResult = shutdown(clientSocket, SD_SEND);
     if (iResult == SOCKET_ERROR)
     {
         printf("shutdown failed with error: %d\n", WSAGetLastError());
         closesocket(clientSocket);
         WSACleanup();
         return 1;
-    }*/
+    }
 
     closesocket(listenSocket);
     closesocket(clientSocket);
