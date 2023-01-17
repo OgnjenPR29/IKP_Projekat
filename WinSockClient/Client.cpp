@@ -1,103 +1,286 @@
-#define WIN32_LEAN_AND_MEAN
+#include "Header.h"
 
-#include <windows.h>
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <conio.h>
-
-#define DEFAULT_BUFLEN 512
-#define DEFAULT_PORT 27016
-
-bool InitializeWindowsSockets();
+char regName[20];
 HANDLE mutex;
+klijent* hashArray[SIZE];
 
-struct message {
+klijent* search(char* key) {
+    int hashIndex = hashCode(key);
+
+    while (hashArray[hashIndex] != NULL) {
+
+        if (strcmp(hashArray[hashIndex]->ime, key) == 0)
+            return hashArray[hashIndex];
+
+        ++hashIndex;
+        hashIndex %= SIZE;
+    }
+
+    return NULL;
+}
+
+//TO DO:
+// 
+//zameniti niz u serveru sa hashmapom
+//proslediti hashmapu kao parametar u niti u client.cpp
+//lockovi ili mutexi ili semafori da se skonta gde treba i da se implementira
+//treba pokusati da se razdvoji sve u .h i .cpp fajlove sto je vise moguce
+//treba napraviti proveru da li je vec neko registrovan sa tim imenom i javiti klijentu da postoji to ime
+//i treba da se brise iz hash mape ukoliko se prekine konekcija sa kljentom - to cemo na kraju 
+//treba proveriti da li se klijent konektovao sa nekim klijentom
+//(ili taj klijent sa njim, tj da li postoji u hash mapi na klijentskoj strani) i onemoguciti mu da to opet uradi
+
+
+//kada se direktno konektujes ovde primas poruke od tih klijenata
+DWORD WINAPI client_IConnect_recv_function(LPVOID lpParam) {
+
+    char buff[1024];
+    klijent* client = (klijent*)lpParam;
+    SOCKET clientSocket = client->soket;
+
+    while (true) {
+
+        int iResult = recv(clientSocket, buff, DEFAULT_BUFLEN, 0);
+        buff[iResult] = '\0';
+        if (iResult > 0) {
+            printf("\nReceived message from client %s: %s.\n", client->ime, buff);
+        }
+        else if (iResult == 0) {
+            printf("\nConnection closed.\n");
+            break;
+        }
+        else {
+            printf("\nError receiving message: %d\n", WSAGetLastError());
+            break;
+        }
+
+    }
+
+    char clientName[DEFAULT_BUFLEN];
+
+    for (int i = 0; i < SIZE; i++) {
+        if (hashArray[i] != NULL && hashArray[i]->soket == clientSocket) {
+            strcpy(clientName, hashArray[i]->ime);
+            hashArray[i] = NULL;
+            break;
+        }
+    }
+    printf("\nRemoved client %s from hashmap.\n", clientName);
+
+    //cleanup
+    closesocket(clientSocket);
+    return 0;
+
+}
+
+//ovde se ide kad se primi od servera port i ip za direktnu komunikaciju -ovde ide hash mapa
+DWORD WINAPI connect_to_client_function(LPVOID lpParam) {
+
+    int iResult;
+    DWORD threadId;
     
-    bool direktna;
-    char ime[20];
-    char tekst[250];
+    zaKonekciju* poruka = (zaKonekciju*)lpParam;
+    
+    char ip[INET_ADDRSTRLEN];
+    int port = poruka->port;
 
-};
+    strcpy(ip, poruka->ip);
+    
+    printf("\nUsao je u konekciju: ip: %s i port %d\n", ip, port);
 
+    //pravimo soket
+    SOCKET connectSocket = INVALID_SOCKET;
+    connectSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (connectSocket == INVALID_SOCKET)
+    {
+        printf("socket failed with error: %ld\n", WSAGetLastError());
+        WSACleanup();
+        return 1;
+    }
+
+    //definisemo port i ip na koji zelimo da se povezemo
+    sockaddr_in otherClientAddress;
+    otherClientAddress.sin_family = AF_INET;
+    otherClientAddress.sin_addr.s_addr = inet_addr(ip);
+    otherClientAddress.sin_port = htons(port);
+
+    //konektujemo se
+    if (connect(connectSocket, (SOCKADDR*)&otherClientAddress, sizeof(otherClientAddress)) == SOCKET_ERROR)
+    {
+        printf("\nUnable to connect to other client.\n");
+        getch();
+        closesocket(connectSocket);
+        WSACleanup();
+    }
+
+    //saljemo nase ime da bi klijent znao sa kim komunicira i da bi mogao da ispise ko mu salje poruke
+    iResult = send(connectSocket, regName, (int)strlen(regName) + 1, 0);
+    if (iResult == SOCKET_ERROR)
+    {
+        printf("\nsend failed with error: %d\n", WSAGetLastError());
+        closesocket(connectSocket);
+        WSACleanup();
+        return 1;
+    }
+
+    printf("\nBytes Sent: %ld\n", iResult);
+
+    //upis u niz ili hash set
+
+    char name[20];
+    klijent* item = (klijent*)malloc(sizeof(klijent));
+    if (item == NULL) {
+        printf("\nFailed to allocate memory for item.\n");
+        return 0;
+    }
+    strcpy(name, poruka->ime);
+
+    strcpy(item->ime, poruka->ime);
+    item->soket = connectSocket;
+    int hashIndex = hashCode(name);
+
+    while (hashArray[hashIndex] != NULL && hashArray[hashIndex]->ime != "") {
+        hashIndex++;
+        hashIndex %= SIZE;
+    }
+    hashArray[hashIndex] = item;
+
+    HANDLE recvThread = CreateThread(NULL, 0, client_IConnect_recv_function, item, 0, &threadId);
+
+    return 0;
+}
+
+//za unos i slanje
 DWORD WINAPI input_thread_function(LPVOID lpParam) {
 
     int n;
     int recv_bytes;
     bool direktno;
-    char pomocna;
+    char pomocna[2];
+    char provera[20];
     char str1[20];
     char str2[250];
     struct message poruka;
 
-
-    SOCKET connectSocket = *(SOCKET*)lpParam;
     while (1) {
+        printf("\nUnesite sa kim zelite da komunicirate ('server' ukoliko zelite sa serverom): ");
+        scanf(" %s", &provera);
 
-        while (true) {
+        //ovo sve je vezano za servera
 
-            printf("Unesite koji tip komunikacije zelite D-direktno P-preko servera: ");
-            scanf(" %c", &pomocna);
+        if (strcmp(provera, "server") == 0) {
 
-            if (pomocna == 'D' || pomocna == 'd') {
-                direktno = 1;
+            SOCKET connectSocket = *(SOCKET*)lpParam;
+            while (1) {
+
+                while (true) {
+
+                    printf("Unesite koji tip komunikacije zelite D-direktno P-preko servera: ");
+                    scanf(" %s", &pomocna);
+
+                    if (strcmp(pomocna,"D") == 0 || strcmp(pomocna,"d") == 0) {
+                        direktno = 1;
+                        break;
+                    }
+                    else if (strcmp(pomocna, "P") == 0 || strcmp(pomocna, "p") == 0) {
+                        direktno = 0;
+                        break;
+                    }
+                    else {
+                        printf("Niste uneli dobar flag!\n");
+                    }
+                }
+
+               printf("Unesite ime klijenta sa kim zelite da komunicirate: ");
+                scanf(" %s%n", str1, &n);
+                str1[n] = '\0';
+
+                if (direktno == 1) {
+
+                    //treba proveriti da li to sto je u str1 postoji u nasoj hashmapi i ako postoji - greska
+
+                    strcpy(str2, "Posalji mi soket");
+                    printf("\nOvo se salje serveru: %s %s", str1, str2);
+                }
+
+                else {
+
+                    printf("\nUnesite tekst poruke: ");
+                    scanf(" %[^\n]%n", str2, &n);
+                    str2[n] = '\0';
+                    printf("\nOvo se salje serveru: %s %s", str1, str2);
+
+                }
+
+                poruka.direktna = direktno;
+                strcpy(poruka.ime, str1);
+                strcpy(poruka.tekst, str2);
+
+                //        WaitForSingleObject(mutex, INFINITE);
+                int iResult = send(connectSocket, (const char*)&poruka, sizeof(poruka), 0);
+
+                if (iResult == SOCKET_ERROR)
+                {
+                    printf("\nsend failed with error: %d\n", WSAGetLastError());
+                    closesocket(connectSocket);
+                    WSACleanup();
+                    return 1;
+                }
+
+                printf("\nBytes Sent: %ld\n", iResult);
                 break;
-            }
-            else if (pomocna == 'P' || pomocna == 'p') {
-                direktno = 0;
-                break;
-            }
-            else {
-                printf("Niste uneli dobar flag!\n");
+                // ReleaseMutex(mutex);
             }
         }
-
-        printf("Unesite ime klijenta sa kim zelite da komunicirate: ");
-        scanf(" %s%n", str1,&n);
-        str1[n] = '\0';
-
-
-        if (direktno == 1) {
-            strcpy(str2, "Posalji mi soket");
-            printf("Ovo se salje serveru: %s %s", str1, str2);
-        }
-
         else {
 
-            printf("\nUnesite tekst poruke: ");
-            scanf(" %[^\n]%n", str2, &n);
-            str2[n] = '\0';
-            printf("Ovo se salje serveru: %s %s", str1, str2);
+            char mess[300];
+            char temp[250];
+            int v;
+
+            strcpy(mess, "Klijent ");
+            strcat(mess, regName);
+            strcat(mess, " salje: ");
+
+            //proci kroz hash mapu i izvuci klijenta sa kojim zelimo da komuniciramo ukoliko ne postoji baciti continue
+
+            klijent* k = search(provera);
+
+            if (k == NULL) {
+                printf("\nne postoji taj klijent\n");
+                continue;
+            }
+
+            printf("\nUnesite poruku: ");
+            scanf(" %[^\n]%n", temp, &v);
+            temp[v] = '\0';
+
+            strcat(mess, temp);
+
+            int iResult = send(k->soket, mess, sizeof(mess), 0);
+
+            if (iResult == SOCKET_ERROR)
+            {
+                printf("send failed with error: %d\n", WSAGetLastError());
+                closesocket(k->soket);
+                WSACleanup();
+                return 1;
+            }
+
+            printf("Bytes Sent: %ld\n", iResult);
 
         }
-
-        poruka.direktna = direktno;
-        strcpy(poruka.ime, str1);
-        strcpy(poruka.tekst, str2);
-
-//        WaitForSingleObject(mutex, INFINITE);
-        int iResult = send(connectSocket, (const char*)&poruka, sizeof(poruka), 0);
-
-        if (iResult == SOCKET_ERROR)
-        {
-            printf("send failed with error: %d\n", WSAGetLastError());
-            closesocket(connectSocket);
-            WSACleanup();
-            return 1;
-        }
-
-        printf("Bytes Sent: %ld\n", iResult);
-       // ReleaseMutex(mutex);
     }
-
     return 0;
 
 }
 
+//za primanje poruka od servera
 DWORD WINAPI recv_thread_function(LPVOID lpParam) {
 
-    SOCKET connectSocket = *(SOCKET*)lpParam;
+    SOCKET servSocket = *(SOCKET*)lpParam;
+
+    DWORD threadId;
 
     while (true) {
 
@@ -105,32 +288,218 @@ DWORD WINAPI recv_thread_function(LPVOID lpParam) {
         char buff[1024];
 
         //WaitForSingleObject(mutex, INFINITE);
-        if ((recv_bytes = recv(connectSocket, buff, 512, 0)) == -1) {
+        if ((recv_bytes = recv(servSocket, buff, 512, 0)) == -1) {
             perror("recv");
             return 1;
         }
 
         buff[recv_bytes] = '\0';
 
-        printf("\nReceived: %s\n", buff);
+
+        if(strncmp(buff, "D", 1) == 0) {
+
+            char* token;
+            char type;
+            char ip[INET_ADDRSTRLEN];
+            int port;
+            char name[20];
+
+            token = strtok(buff, " ");
+            type = token[0];
+
+            token = strtok(NULL, " ");
+            strcpy(ip, token);
+
+            token = strtok(NULL, " ");
+            port = atoi(token);
+
+            token = strtok(NULL, " ");
+            strcpy(name, token);
+
+            printf("\ntype: %c\n", type);
+            printf("ip: %s\n", ip);
+            printf("port: %d\n", port);
+            printf("name: %s\n", name);
+
+            zaKonekciju poruka;
+
+            strcpy(poruka.ip,ip);
+            poruka.port = port;
+            strcpy(poruka.ime, name);
+
+            HANDLE connectThread = CreateThread(NULL, 0, connect_to_client_function, &poruka, 0, &threadId);
+            if (connectThread == NULL)
+            {
+                printf("Failed to create connect_to_client_function thread.\n");
+                return 0;
+            }
+        }
+        else{
+            printf("\nReceived: %s\n", buff);
+        }
+        //neki elsif ako pocinje sa V onda ispisati niste registrovani 
         //ReleaseMutex(mutex);
 
     }
     return 0;
 }
 
+//ovde posle listena se primaju poruke od klijenata
+DWORD WINAPI recv_function_for_client(LPVOID lpParam) {
+
+    /*DWORD wait_result = WaitForSingleObject(mutex, INFINITE);
+    if (wait_result != WAIT_OBJECT_0) {
+        printf("WaitForSingleObject failed: %d\n", GetLastError());
+        return 1;
+    }*/
+
+    SOCKET clientSocket = *(SOCKET*)lpParam;
+    
+    char message[DEFAULT_BUFLEN];
+
+    while (1) {
+        int iResult = recv(clientSocket, message, DEFAULT_BUFLEN, 0);
+        if (iResult > 0) {
+            printf("\nReceived message from client: %s.\n", message);
+        }
+        else if (iResult == 0) {
+            printf("Connection closed.\n");
+            break;
+        }
+        else {
+            printf("Error receiving message: %d\n", WSAGetLastError());
+            break;
+        }
+    }
+
+    //remove client from hashmap
+    char clientName[DEFAULT_BUFLEN];
+    for (int i = 0; i < SIZE; i++) {
+        if (hashArray[i] != NULL && hashArray[i]->soket == clientSocket) {
+            strcpy(clientName, hashArray[i]->ime);
+            hashArray[i] = NULL;
+            break;
+        }
+    }
+    printf("\nRemoved client %s from hashmap.\n", clientName);
+
+    //cleanup
+    closesocket(clientSocket);
+    return 0;
+
+}
+
+//tred za listen -ovde ide hash mapa
+DWORD WINAPI connection_thread_function(LPVOID lpParam) {
+
+    /*mutex = CreateMutex(NULL, FALSE, NULL);
+    if (mutex == NULL) {
+        printf("CreateMutex error: %d\n", GetLastError());
+        return 1;
+    }*/
+
+    SOCKET listenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (listenSocket == INVALID_SOCKET) {
+        printf("socket failed with error: %ld\n", WSAGetLastError());
+        return 1;
+    }
+
+    int listenPort = *(int*)lpParam;
+    
+    // Bind the socket to an IP address and port
+    sockaddr_in service;
+    service.sin_family = AF_INET;
+    service.sin_addr.s_addr = INADDR_ANY;
+    service.sin_port = htons(listenPort);
+
+    if (bind(listenSocket, (SOCKADDR*)&service, sizeof(service)) == SOCKET_ERROR) {
+        printf("bind failed with error: %d\n", WSAGetLastError());
+        closesocket(listenSocket);
+        return 1;
+    }
+
+    // Start listening for incoming connections
+    if (listen(listenSocket, SOMAXCONN) == SOCKET_ERROR) {
+        printf("listen failed with error: %d\n", WSAGetLastError());
+        closesocket(listenSocket);
+        return 1;
+    }
+
+    DWORD communicationThreadId;
+    // Accept incoming connections and create threads to handle communication
+
+    while (true) {
+
+        SOCKET connectSocket = accept(listenSocket, NULL, NULL);
+        
+        if (connectSocket == INVALID_SOCKET) {
+            printf("accept failed with error: %d\n", WSAGetLastError());
+            closesocket(listenSocket);
+            return 1;
+        }
+        //primi ime i sacuvaj  ga
+
+
+        char name[20];
+        int iResult = recv(connectSocket, name, 20, 0);
+
+        if (iResult > 0) {
+            printf("\nReceived client name: %s.\n", name);
+        
+            //save client name and socket
+            klijent* item = (klijent*)malloc(sizeof(klijent));
+            if (item == NULL) {
+                printf("Failed to allocate memory for item.\n");
+                return 0;
+            }
+            strcpy(item->ime, name);
+            item->soket = connectSocket;
+            int hashIndex = hashCode(name);
+
+            while (hashArray[hashIndex] != NULL && hashArray[hashIndex]->ime != "") {
+                hashIndex++;
+                hashIndex %= SIZE;
+            }
+            hashArray[hashIndex] = item;
+
+        }
+
+        HANDLE communication_thread_handle = CreateThread(NULL, 0, recv_function_for_client, &connectSocket, 0, &communicationThreadId);
+        if (communication_thread_handle == NULL) {
+            printf("CreateThread failed with error: %d\n", GetLastError());
+            closesocket(connectSocket);
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 int __cdecl main() 
 {
     SOCKET connectSocket = INVALID_SOCKET;
-    int iResult;
     DWORD threadId1;
     DWORD threadId2;
+    DWORD threadId3;
+
+
     int n;
+    int iResult;
+    char messageToSend[20];
+    ConnectMessage message;
 
     printf("Unesite ime za registraciju: ");
-    char messageToSend[20];
     scanf(" %s%n", messageToSend, &n);
     messageToSend[n] = '\0';
+
+    strcpy(message.clientName, messageToSend);
+
+    printf("Unesite port za komunikaciju s drugim klijentima: ");
+    scanf("%d", &message.listenPort);
+
+    strcpy(regName, messageToSend);
+
+    printf("\n%s %d\n", message.clientName, message.listenPort);
 
     if(InitializeWindowsSockets() == false)
     {
@@ -138,9 +507,7 @@ int __cdecl main()
     }
 
     // create a socket
-    connectSocket = socket(AF_INET,
-                           SOCK_STREAM,
-                           IPPROTO_TCP);
+    connectSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
     if (connectSocket == INVALID_SOCKET)
     {
@@ -165,8 +532,8 @@ int __cdecl main()
         WSACleanup();
     }
  
-    // Send an prepared message with null terminator included
-    iResult = send( connectSocket, messageToSend, (int)strlen(messageToSend) + 1, 0 );
+    //ovde salje ime za rregistraciju i port
+    iResult = send( connectSocket, (const char*)&message, sizeof(ConnectMessage), 0);
 
     if (iResult == SOCKET_ERROR)
     {
@@ -176,29 +543,51 @@ int __cdecl main()
         return 1;
     }
 
+    //ovde da se uradi prvi recv koji ce da proveri da li smo uspesno registrovani
+    //a na serverskoj strani moramo uraditi jedan send odmah nakon sto primimo ime za registraciju
+    //i taj send ce da vrati OK ili NE OK i u zavisnosti od toga mi smemo da nastavimo dalje
+    //ako je NE OK onda ispisati da postoji to ime i ponovo prikazati formu za registraciju
+
     printf("Bytes Sent: %ld\n", iResult);
 
     mutex = CreateMutex(NULL, FALSE, NULL);
 
+    //za slanje poruka
     HANDLE consoleThread = CreateThread(NULL, 0, input_thread_function, &connectSocket, 0, &threadId1);
     if (consoleThread == NULL)
     {
-        printf("Failed to create client thread.\n");
+        printf("Failed to create console thread.\n");
         closesocket(connectSocket);
         return 0;
     }
 
-    HANDLE recvThread = CreateThread(NULL, 0, recv_thread_function, &connectSocket, 0, &threadId2);
-    if (recvThread == NULL)
+    //recv za servera
+    HANDLE recvServerThread = CreateThread(NULL, 0, recv_thread_function, &connectSocket, 0, &threadId2);
+    if (recvServerThread == NULL)
     {
-        printf("Failed to create client thread.\n");
+        printf("Failed to create recv server thread.\n");
+        closesocket(connectSocket);
+        return 0;
+    }
+
+    HANDLE listenThread = CreateThread(NULL, 0, connection_thread_function, &message.listenPort, 0, &threadId2);
+    if (listenThread == NULL)
+    {
+        printf("Failed to create listen thread.\n");
         closesocket(connectSocket);
         return 0;
     }
 
     WaitForSingleObject(consoleThread, INFINITE);
-    WaitForSingleObject(recvThread, INFINITE);
+    WaitForSingleObject(recvServerThread, INFINITE);
+    WaitForSingleObject(listenThread, INFINITE);
     
+    for (int i = 0; i < SIZE; i++) {
+        if (hashArray[i] != NULL) {
+            free(hashArray[i]);
+            hashArray[i] = NULL;
+        }
+    }
 
     closesocket(connectSocket);
     WSACleanup();
@@ -206,14 +595,3 @@ int __cdecl main()
     return 0;
 }
 
-bool InitializeWindowsSockets()
-{
-    WSADATA wsaData;
-
-    if (WSAStartup(MAKEWORD(2,2), &wsaData) != 0)
-    {
-        printf("WSAStartup failed with error: %d\n", WSAGetLastError());
-        return false;
-    }
-	return true;
-}
