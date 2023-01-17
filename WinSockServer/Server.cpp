@@ -3,39 +3,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
+#include "Header.h"
 
-#define DEFAULT_BUFLEN 512
-#define DEFAULT_PORT "27016"
-#define BUFFER_SIZE 1024
-#define MAX_CLIENTS 1000
-
-bool InitializeWindowsSockets();
-
-struct client {
-    SOCKET socket;
-    int port;
-    char ip[INET_ADDRSTRLEN];
-    char ime[20];
-
-};
-
-struct client clients[MAX_CLIENTS];
 int num_clients = 0;
+struct client clients[MAX_CLIENTS];
 
-typedef struct {
-    SOCKET socket;
-    int port;
-    char ip[INET_ADDRSTRLEN];
-} ThreadArgs;
-
-
-struct message {
-
-    bool direktna;
-    char ime[20];
-    char tekst[250];
-
-};
 
 DWORD WINAPI clientHandler(LPVOID lpParam)
 {
@@ -48,21 +20,23 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
     struct message poruka;
     ThreadArgs* argumenti = (ThreadArgs*)lpParam;
 
+    struct ConnectMessage firstRecieve;
+
     char rb[1024];
     char p[10];
     char currIme[20];
 
     SOCKET clientSocket = argumenti->socket;
     char* ip = argumenti->ip;
-    int port = argumenti->port;
+    //int port = argumenti->port;
 
     while (flag == 0) {
 
-        int iResult = recv(clientSocket, rb, DEFAULT_BUFLEN, 0);
+        int iResult = recv(clientSocket, (char*)&firstRecieve, sizeof(struct ConnectMessage), 0);
 
         if (iResult > 0)
         {
-            printf("Registrovan client: %s.\n", rb);
+            printf("Registrovan client: %s.\n", firstRecieve.clientName);
         }
         else if (iResult == 0)
         {
@@ -77,11 +51,13 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
 
         flag++;
 
-        strcpy(klijent.ime, rb);
-        strcpy(currIme, rb);
+        strcpy(klijent.ime, firstRecieve.clientName);
+        strcpy(currIme, firstRecieve.clientName);
         klijent.socket = clientSocket;
         memcpy(klijent.ip, ip, INET_ADDRSTRLEN);
-        klijent.port = port;
+        klijent.port = firstRecieve.listenPort;
+
+        //ovde upisujemo
 
         printf("Ovde je upisan klijent %s %s %d\n", klijent.ime, klijent.ip, klijent.port);
 
@@ -98,7 +74,7 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
 
             if (iResult > 0)
             {
-                printf("Message received from client: %s.\n", rb);
+                printf("Message received from client: %s.\n", poruka.tekst);
             }
             else if (iResult == 0)
             {
@@ -126,8 +102,11 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
 
                         strcat(odgovor, "D ");
                         strcat(odgovor, clients[i].ip);
-                        strcat(odgovor, "   ");
+                        strcat(odgovor, " ");
                         strcat(odgovor, p);
+                        strcat(odgovor, " ");
+                        strcat(odgovor, clients[i].ime);
+                        
                            
                         printf("Ovaj odgovor server salje: %s", odgovor);
 
@@ -140,7 +119,7 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
                         break;
                     }
                     if(i == (int)(arrayLength) - 1) {
-                        strcpy(odgovor, "Ne postoji korisnik sa takvim imenom");
+                        strcpy(odgovor, "E Ne postoji korisnik sa takvim imenom");
                         if ((send_bytes = send(clientSocket, odgovor, (int)strlen(odgovor) + 1, 0)) == -1) {
                             perror("send");
                             return 1;
@@ -196,6 +175,7 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
 
     return 0;
 }
+
 
 
 int  main(void) 
