@@ -3,11 +3,12 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
-#include "Header.h"
+//#include "Header.h"
+#include "HashServer.h"
 
 int num_clients = 0;
-struct client clients[MAX_CLIENTS];
-
+//struct client clients[MAX_CLIENTS];
+client* hashArray[SIZE];
 
 DWORD WINAPI clientHandler(LPVOID lpParam)
 {
@@ -22,7 +23,6 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
 
     struct ConnectMessage firstRecieve;
 
-    char rb[1024];
     char p[10];
     char currIme[20];
 
@@ -62,119 +62,129 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
         iResult = send(clientSocket, bla, (int)strlen(bla) + 1, 0);
 
         //ovde upisujemo
+        client* item = (client*)malloc(sizeof(client));
+        if (item == NULL) {
+            printf("Failed to allocate memory for item.\n");
+            return 0;
+        }
+        strcpy(item->ime, klijent.ime);
+        item->socket = clientSocket;
+        item->port = klijent.port;
+        strcpy(item->ip, klijent.ip);
+        int hashIndex = hashCode(klijent.ime);
 
+        while (hashArray[hashIndex] != NULL && hashArray[hashIndex]->ime != "") {
+            hashIndex++;
+            hashIndex %= SIZE;
+        }
+        hashArray[hashIndex] = item;
         printf("Ovde je upisan klijent %s %s %d\n", klijent.ime, klijent.ip, klijent.port);
 
-        clients[num_clients++] = klijent;
+        //clients[num_clients++] = klijent;
 
     }
-        while (1) {
+    while (1) {
 
-            int iResult = recv(clientSocket, (char*)&poruka, sizeof(struct message), 0);
-            char odgovor[50];
-            memset(odgovor, 0, sizeof(odgovor));
+        int iResult = recv(clientSocket, (char*)&poruka, sizeof(struct message), 0);
+        char odgovor[50];
+        memset(odgovor, 0, sizeof(odgovor));
 
-            printf("\nOvo je server primio: %d %s %s\n",poruka.direktna, poruka.ime, poruka.tekst);
+        printf("\nOvo je server primio: %d %s %s\n", poruka.direktna, poruka.ime, poruka.tekst);
 
-            if (iResult > 0)
+        if (iResult > 0)
+        {
+            printf("Message received from client: %s.\n", poruka.tekst);
+        }
+        else if (iResult == 0)
+        {
+            // connection was closed gracefully
+            printf("Connection with client closed.\n");
+            closesocket(clientSocket);
+        }
+        else
+        {
+            // there was an error during recv
+            printf("recv failed with error: %d\n", WSAGetLastError());
+            closesocket(clientSocket);
+            return 1;
+        }
+
+        if (poruka.direktna) {
+            //kod koji salje soket
+            //size_t arrayLength = sizeof(ClientHashs) / sizeof(clients[0]);
+            client* requestedClient = search(poruka.ime, hashArray);
+            if (requestedClient != NULL)
             {
-                printf("Message received from client: %s.\n", poruka.tekst);
+                itoa(requestedClient->port, p, 10);
+
+                strcat(odgovor, "D ");
+                strcat(odgovor, requestedClient->ip);
+                strcat(odgovor, " ");
+                strcat(odgovor, p);
+                strcat(odgovor, " ");
+                strcat(odgovor, requestedClient->ime);
+
+
+                printf("Ovaj odgovor server salje: %s", odgovor);
+
+                if ((send_bytes = send(clientSocket, odgovor, (int)strlen(odgovor) + 1, 0)) == -1) {
+                    perror("send");
+                    return 1;
+                }
+                memset(odgovor, 0, sizeof(odgovor));
+
+
             }
-            else if (iResult == 0)
+            else {
+                strcpy(odgovor, "E Ne postoji korisnik sa takvim imenom");
+                if ((send_bytes = send(clientSocket, odgovor, (int)strlen(odgovor) + 1, 0)) == -1) {
+                    perror("send");
+                    return 1;
+                }
+                memset(odgovor, 0, sizeof(odgovor));
+            }
+
+
+        }
+        else {
+            //kod koji prosledjuje poruku
+           // size_t arrayLength = sizeof(clients) / sizeof(clients[0]);
+            client* requestedClient = search(poruka.ime, hashArray);
+            if (requestedClient != NULL)
             {
-                // connection was closed gracefully
-                printf("Connection with client closed.\n");
-                closesocket(clientSocket);
+                strcat(odgovor, "P Klijent ");
+                strcat(odgovor, currIme);//registrovano ime
+                strcat(odgovor, " salje poruku: ");
+                strcat(odgovor, poruka.tekst);
+
+
+                printf("Ovaj odgovor server salje: %s", odgovor);
+
+                if ((send_bytes = send(requestedClient->socket, odgovor, (int)strlen(odgovor) + 1, 0)) == -1) {
+                    perror("send");
+                    return 1;
+                }
+                memset(odgovor, 0, sizeof(odgovor));
+
+
             }
             else
             {
-                // there was an error during recv
-                printf("recv failed with error: %d\n", WSAGetLastError());
-                closesocket(clientSocket);
-                return 1;
-            }
-
-            if (poruka.direktna) {
-                //kod koji salje soket
-                size_t arrayLength = sizeof(clients) / sizeof(clients[0]);
-
-                for(int i = 0; i < arrayLength; i++) {
-
-                    if (strcmp(clients[i].ime,poruka.ime) == 0) {
-
-                        itoa(clients[i].port, p, 10);
-
-                        strcat(odgovor, "D ");
-                        strcat(odgovor, clients[i].ip);
-                        strcat(odgovor, " ");
-                        strcat(odgovor, p);
-                        strcat(odgovor, " ");
-                        strcat(odgovor, clients[i].ime);
-                        
-                           
-                        printf("Ovaj odgovor server salje: %s", odgovor);
-
-                        if ((send_bytes = send(clientSocket, odgovor, (int)strlen(odgovor) + 1, 0)) == -1) {
-                            perror("send");
-                            return 1;
-                        }
-                        memset(odgovor, 0, sizeof(odgovor));
-
-                        break;
-                    }
-                    if(i == (int)(arrayLength) - 1) {
-                        strcpy(odgovor, "E Ne postoji korisnik sa takvim imenom");
-                        if ((send_bytes = send(clientSocket, odgovor, (int)strlen(odgovor) + 1, 0)) == -1) {
-                            perror("send");
-                            return 1;
-                        }
-                        memset(odgovor, 0, sizeof(odgovor));
-
-                        break;
-                    }
+                strcpy(odgovor, "Ne postoji taj klijent");
+                if ((send_bytes = send(clientSocket, odgovor, (int)strlen(odgovor) + 1, 0)) == -1) {
+                    perror("send");
+                    return 1;
                 }
-            }
-            else {
-                //kod koji prosledjuje poruku
-                size_t arrayLength = sizeof(clients) / sizeof(clients[0]);
+                memset(odgovor, 0, sizeof(odgovor));
 
-                for (int i = 0; i < arrayLength; i++) {
-                 
-                    if (strcmp(clients[i].ime, poruka.ime) == 0) {
-
-                        strcat(odgovor, "P Klijent ");
-                        strcat(odgovor, currIme);//registrovano ime
-                        strcat(odgovor, " salje poruku: ");
-                        strcat(odgovor, poruka.tekst);
-
-                        printf("\nOvaj odgovor server salje: %s", odgovor);
-
-                        if ((send_bytes = send(clients[i].socket, odgovor, (int)strlen(odgovor) + 1, 0)) == -1) {
-                            perror("send");
-                            return 1;
-                        }
-                        memset(odgovor, 0, sizeof(odgovor));
-
-                        break;
-
-                    }
-                    if(i == (int)(arrayLength) - 1)
-                    {
-                        strcpy(odgovor, "Ne postoji taj klijent");
-                        if ((send_bytes = send(clientSocket, odgovor, (int)strlen(odgovor) + 1, 0)) == -1) {
-                            perror("send");
-                            return 1;
-                        }
-                        memset(odgovor, 0, sizeof(odgovor));
-
-                        break;
-                    }
-                }
 
             }
+
+
         }
+    }
 
-    
+
 
 
     return 0;
@@ -182,7 +192,7 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
 
 
 
-int  main(void) 
+int  main(void)
 {
     // Socket used for listening for new clients 
     SOCKET listenSocket = INVALID_SOCKET;
@@ -192,18 +202,18 @@ int  main(void)
     int iResult;
     // Buffer used for storing incoming data
     char recvbuf[DEFAULT_BUFLEN];
-    
+
     DWORD threadId;
 
-    if(InitializeWindowsSockets() == false)
+    if (InitializeWindowsSockets() == false)
     {
-		// we won't log anything since it will be logged
-		// by InitializeWindowsSockets() function
-		return 1;
+        // we won't log anything since it will be logged
+        // by InitializeWindowsSockets() function
+        return 1;
     }
-    
+
     // Prepare address information structures
-    addrinfo *resultingAddress = NULL;
+    addrinfo* resultingAddress = NULL;
     addrinfo hints;
 
     memset(&hints, 0, sizeof(hints));
@@ -214,7 +224,7 @@ int  main(void)
 
     // Resolve the server address and port
     iResult = getaddrinfo(NULL, DEFAULT_PORT, &hints, &resultingAddress);
-    if ( iResult != 0 )
+    if (iResult != 0)
     {
         printf("getaddrinfo failed with error: %d\n", iResult);
         WSACleanup();
@@ -223,8 +233,8 @@ int  main(void)
 
     // Create a SOCKET for connecting to server
     listenSocket = socket(AF_INET,      // IPv4 address famly
-                          SOCK_STREAM,  // stream socket
-                          IPPROTO_TCP); // TCP
+        SOCK_STREAM,  // stream socket
+        IPPROTO_TCP); // TCP
 
     if (listenSocket == INVALID_SOCKET)
     {
@@ -235,7 +245,7 @@ int  main(void)
     }
 
     // Setup the TCP listening socket - bind port number and local address to socket
-    iResult = bind( listenSocket, resultingAddress->ai_addr, (int)resultingAddress->ai_addrlen);
+    iResult = bind(listenSocket, resultingAddress->ai_addr, (int)resultingAddress->ai_addrlen);
     if (iResult == SOCKET_ERROR)
     {
         printf("bind failed with error: %d\n", WSAGetLastError());
@@ -258,7 +268,7 @@ int  main(void)
         return 1;
     }
 
-	printf("Server initialized, waiting for clients.\n");
+    printf("Server initialized, waiting for clients.\n");
 
 
     while (1)
@@ -295,7 +305,7 @@ int  main(void)
 
         // Kreiranje novog thread-a za obradu zahteva od klijenta
         HANDLE clientThread = CreateThread(NULL, 0, clientHandler, &argumenti, 0, &threadId);
-       
+
         if (clientThread == NULL)
         {
             printf("Failed to create client thread.\n");
@@ -305,53 +315,53 @@ int  main(void)
     }
 
 
-   /* do
-    {
-        // Wait for clients and accept client connections.
-        // Returning value is acceptedSocket used for further
-        // Client<->Server communication. This version of
-        // server will handle only one client.
+    /* do
+     {
+         // Wait for clients and accept client connections.
+         // Returning value is acceptedSocket used for further
+         // Client<->Server communication. This version of
+         // server will handle only one client.
 
 
-        acceptedSocket = accept(listenSocket, NULL, NULL);//soket od klijenta koji se trenutno konektovao
+         acceptedSocket = accept(listenSocket, NULL, NULL);//soket od klijenta koji se trenutno konektovao
 
 
 
-        if (acceptedSocket == INVALID_SOCKET)
-        {
-            printf("accept failed with error: %d\n", WSAGetLastError());
-            closesocket(listenSocket);
-            WSACleanup();
-            return 1;
-        }
+         if (acceptedSocket == INVALID_SOCKET)
+         {
+             printf("accept failed with error: %d\n", WSAGetLastError());
+             closesocket(listenSocket);
+             WSACleanup();
+             return 1;
+         }
 
-       do
-        {
-            // Receive data until the client shuts down the connection
-            iResult = recv(acceptedSocket, recvbuf, DEFAULT_BUFLEN, 0);
-            if (iResult > 0)
-            {
-                printf("Message received from client: %s.\n", recvbuf);
-            }
-            else if (iResult == 0)
-            {
-                // connection was closed gracefully
-                printf("Connection with client closed.\n");
-                closesocket(acceptedSocket);
-            }
-            else
-            {
-                // there was an error during recv
-                printf("recv failed with error: %d\n", WSAGetLastError());
-                closesocket(acceptedSocket);
-            }
-        } while (iResult > 0);
+        do
+         {
+             // Receive data until the client shuts down the connection
+             iResult = recv(acceptedSocket, recvbuf, DEFAULT_BUFLEN, 0);
+             if (iResult > 0)
+             {
+                 printf("Message received from client: %s.\n", recvbuf);
+             }
+             else if (iResult == 0)
+             {
+                 // connection was closed gracefully
+                 printf("Connection with client closed.\n");
+                 closesocket(acceptedSocket);
+             }
+             else
+             {
+                 // there was an error during recv
+                 printf("recv failed with error: %d\n", WSAGetLastError());
+                 closesocket(acceptedSocket);
+             }
+         } while (iResult > 0);
 
-        // here is where server shutdown loguc could be placed
+         // here is where server shutdown loguc could be placed
 
-    } while (1);*/
+     } while (1);*/
 
-    // shutdown the connection since we're done
+     // shutdown the connection since we're done
 
     iResult = shutdown(clientSocket, SD_SEND);
     if (iResult == SOCKET_ERROR)
@@ -361,6 +371,14 @@ int  main(void)
         WSACleanup();
         return 1;
     }
+
+    for (int i = 0; i < SIZE; i++) {
+        if (hashArray[i] != NULL) {
+            free(hashArray[i]);
+            hashArray[i] = NULL;
+        }
+    }
+
 
     closesocket(listenSocket);
     closesocket(clientSocket);
@@ -373,10 +391,10 @@ bool InitializeWindowsSockets()
 {
     WSADATA wsaData;
 
-    if (WSAStartup(MAKEWORD(2,2), &wsaData) != 0)
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
     {
         printf("WSAStartup failed with error: %d\n", WSAGetLastError());
         return false;
     }
-	return true;
+    return true;
 }
