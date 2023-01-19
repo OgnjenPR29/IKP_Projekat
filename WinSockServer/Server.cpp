@@ -57,6 +57,10 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
         memcpy(klijent.ip, ip, INET_ADDRSTRLEN);
         klijent.port = firstRecieve.listenPort;
 
+        char bla[5] = "GOOD";
+
+        iResult = send(clientSocket, bla, (int)strlen(bla) + 1, 0);
+
         //ovde upisujemo
 
         printf("Ovde je upisan klijent %s %s %d\n", klijent.ime, klijent.ip, klijent.port);
