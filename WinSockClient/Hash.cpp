@@ -1,6 +1,5 @@
 #include "Hash.h"
 
-//klijent* hashArray[SIZE];
 klijent* dummyItem;
 klijent* item;
 
@@ -12,7 +11,7 @@ int hashCode(char* key) {
     return hash % SIZE;
 }
 
-/*klijent* search(char* key, klijent* array[sada]) {
+/*klijent* search(char* key, klijent* hashArray[]) {
     int hashIndex = hashCode(key);
 
     while (hashArray[hashIndex] != NULL) {
@@ -27,7 +26,7 @@ int hashCode(char* key) {
     return NULL;
 }*/
 
-/*void insert(klijent* item) {
+/*void insert(klijent* item, klijent* hashArray[]) {
     int hashIndex = hashCode(item->ime);
 
     while (hashArray[hashIndex] != NULL && strcmp(hashArray[hashIndex]->ime, item->ime) != 0) {
@@ -37,7 +36,7 @@ int hashCode(char* key) {
     hashArray[hashIndex] = item;
 }
 
-klijent* clientDelete(char* key) {
+klijent* clientDelete(char* key, klijent* hashArray[]) {
     int hashIndex = hashCode(key);
 
     while (hashArray[hashIndex] != NULL) {
@@ -55,7 +54,7 @@ klijent* clientDelete(char* key) {
     return NULL;
 }
 
-void display() {
+void display(klijent* hashArray[]) {
     int i = 0;
 
     for (i = 0; i < SIZE; i++) {

@@ -12,6 +12,8 @@
 #define MAX_CLIENTS 1000
 
 bool InitializeWindowsSockets();
+int NonBlockingSocket(SOCKET socket, long seconds, long milliseconds);
+
 
 struct client {
     SOCKET socket;

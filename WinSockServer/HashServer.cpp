@@ -1,9 +1,8 @@
 #include "HashServer.h"
 
-//klijent* hashArray[SIZE];
 client* dummyItem;
 client* item;
-//Client* hashArray[SIZE];
+
 int hashCode(char* key) {
     int hash = 0;
     for (int i = 0; i < strlen(key); i++) {
@@ -35,15 +34,15 @@ client* search(char* key, client* array[]) {
         hashIndex %= SIZE;
     }
     hashArray[hashIndex] = item;
-}
+}*/
 
-klijent* clientDelete(char* key) {
+client* clientDelete(char* key, client* hashArray[]) {
     int hashIndex = hashCode(key);
 
     while (hashArray[hashIndex] != NULL) {
 
         if (strcmp(hashArray[hashIndex]->ime, key) == 0) {
-            klijent* temp = hashArray[hashIndex];
+            client* temp = hashArray[hashIndex];
             hashArray[hashIndex] = dummyItem;
             return temp;
         }
@@ -54,7 +53,7 @@ klijent* clientDelete(char* key) {
 
     return NULL;
 }
-
+/*
 void display() {
     int i = 0;
 
