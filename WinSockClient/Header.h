@@ -35,11 +35,6 @@ struct zaKonekciju {
 
 };
 
-/*struct klijent {
-
-    SOCKET soket;
-    char ime[20];
-
-};*/
-
 bool InitializeWindowsSockets();
+int NonBlockingSocket(SOCKET socket, long seconds, long milliseconds);
+

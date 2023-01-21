@@ -3,12 +3,39 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
-//#include "Header.h"
 #include "HashServer.h"
+#include <vector>
+#include <thread>
 
 int num_clients = 0;
-//struct client clients[MAX_CLIENTS];
+
 client* hashArray[SIZE];
+
+bool isWorking = true;
+
+CRITICAL_SECTION hashmap_lock;
+
+DWORD WINAPI exit_function(LPVOID lpParam) {
+    printf("Unesite bilo sta da ugasite server: ");
+    getchar();
+    isWorking = false;
+    return 0;
+}
+
+void GracefullyShutdown(HANDLE a) {
+   
+    for (int i = 0; i < SIZE; i++) {
+        if (hashArray[i] != NULL) {
+            free(hashArray[i]);
+            hashArray[i] = NULL;
+        }
+    }
+
+    CloseHandle(a);
+
+    printf("Usao ovde");
+
+}
 
 DWORD WINAPI clientHandler(LPVOID lpParam)
 {
@@ -28,25 +55,72 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
 
     SOCKET clientSocket = argumenti->socket;
     char* ip = argumenti->ip;
-    //int port = argumenti->port;
+    char good[5] = "GOOD";
+    char bad[5] = "BAD";
 
-    while (flag == 0) {
+    while (flag == 0 && isWorking) {
+
+        if (NonBlockingSocket(clientSocket, 2, 0) == 0) {
+            continue;
+        }
 
         int iResult = recv(clientSocket, (char*)&firstRecieve, sizeof(struct ConnectMessage), 0);
 
         if (iResult > 0)
         {
-            printf("Registrovan client: %s.\n", firstRecieve.clientName);
+            EnterCriticalSection(&hashmap_lock);
+            client* proveri = search(firstRecieve.clientName, hashArray);
+            LeaveCriticalSection(&hashmap_lock);
+
+            if (proveri == NULL) {
+                iResult = send(clientSocket, good, (int)strlen(good) + 1, 0);
+                printf("Registrovan client: %s.\n", firstRecieve.clientName);
+
+            }
+            else {
+                iResult = send(clientSocket, bad, (int)strlen(bad) + 1, 0);
+                continue;
+            }
         }
         else if (iResult == 0)
         {
             printf("Connection with client closed.\n");
+
+            EnterCriticalSection(&hashmap_lock);
+            for (int i = 0; i < SIZE; i++) {
+                if (hashArray[i] != NULL && hashArray[i]->socket == clientSocket) {
+                    //strcpy(clientName, hashArray[i]->ime);
+                    hashArray[i] = NULL;
+                    break;
+                }
+            }
+            LeaveCriticalSection(&hashmap_lock);
+
+            printf("Client removed.\n");
+
             closesocket(clientSocket);
+
+            return 1;
         }
         else
         {
             printf("recv failed with error: %d\n", WSAGetLastError());
+
+            EnterCriticalSection(&hashmap_lock);
+            for (int i = 0; i < SIZE; i++) {
+                if (hashArray[i] != NULL && hashArray[i]->socket == clientSocket) {
+                    //strcpy(clientName, hashArray[i]->ime);
+                    hashArray[i] = NULL;
+                    break;
+                }
+            }
+            LeaveCriticalSection(&hashmap_lock);
+
+            printf("Client removed.\n");
+
             closesocket(clientSocket);
+
+            return 1;
         }
 
         flag++;
@@ -57,66 +131,99 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
         memcpy(klijent.ip, ip, INET_ADDRSTRLEN);
         klijent.port = firstRecieve.listenPort;
 
-        char bla[5] = "GOOD";
-
-        iResult = send(clientSocket, bla, (int)strlen(bla) + 1, 0);
-
         //ovde upisujemo
         client* item = (client*)malloc(sizeof(client));
+
         if (item == NULL) {
             printf("Failed to allocate memory for item.\n");
             return 0;
         }
+
         strcpy(item->ime, klijent.ime);
         item->socket = clientSocket;
         item->port = klijent.port;
         strcpy(item->ip, klijent.ip);
         int hashIndex = hashCode(klijent.ime);
 
+        EnterCriticalSection(&hashmap_lock);
         while (hashArray[hashIndex] != NULL && hashArray[hashIndex]->ime != "") {
             hashIndex++;
             hashIndex %= SIZE;
         }
         hashArray[hashIndex] = item;
+        LeaveCriticalSection(&hashmap_lock);
+
         printf("Ovde je upisan klijent %s %s %d\n", klijent.ime, klijent.ip, klijent.port);
 
-        //clients[num_clients++] = klijent;
-
     }
-    while (1) {
+    while (isWorking) {
+
+        if (NonBlockingSocket(clientSocket, 2, 0) == 0) {
+            continue;
+        }
 
         int iResult = recv(clientSocket, (char*)&poruka, sizeof(struct message), 0);
+
         char odgovor[50];
         memset(odgovor, 0, sizeof(odgovor));
 
-        printf("\nOvo je server primio: %d %s %s\n", poruka.direktna, poruka.ime, poruka.tekst);
 
         if (iResult > 0)
         {
-            printf("Message received from client: %s.\n", poruka.tekst);
+            printf("\nOvo je server primio: %d %s %s\n", poruka.direktna, poruka.ime, poruka.tekst);
+            //printf("Message received from client: %s.\n", poruka.tekst);
         }
         else if (iResult == 0)
         {
             // connection was closed gracefully
             printf("Connection with client closed.\n");
+
+            EnterCriticalSection(&hashmap_lock);
+            for (int i = 0; i < SIZE; i++) {
+                if (hashArray[i] != NULL && hashArray[i]->socket == clientSocket) {
+                    //strcpy(clientName, hashArray[i]->ime);
+                    hashArray[i] = NULL;
+                    break;
+                }
+            }
+            LeaveCriticalSection(&hashmap_lock);
+
+            printf("Client removed.\n");
+
             closesocket(clientSocket);
+
+            return 1;
         }
         else
         {
             // there was an error during recv
             printf("recv failed with error: %d\n", WSAGetLastError());
+
+            EnterCriticalSection(&hashmap_lock);
+            for (int i = 0; i < SIZE; i++) {
+                if (hashArray[i] != NULL && hashArray[i]->socket == clientSocket) {
+                    //strcpy(clientName, hashArray[i]->ime);
+                    hashArray[i] = NULL;
+                    break;
+                }
+            }
+            LeaveCriticalSection(&hashmap_lock);
+
+            printf("Client removed.\n");
+
             closesocket(clientSocket);
             return 1;
         }
 
         if (poruka.direktna) {
             //kod koji salje soket
-            //size_t arrayLength = sizeof(ClientHashs) / sizeof(clients[0]);
+            EnterCriticalSection(&hashmap_lock);
             client* requestedClient = search(poruka.ime, hashArray);
+            LeaveCriticalSection(&hashmap_lock);
+
             if (requestedClient != NULL)
             {
                 itoa(requestedClient->port, p, 10);
-
                 strcat(odgovor, "D ");
                 strcat(odgovor, requestedClient->ip);
                 strcat(odgovor, " ");
@@ -124,23 +231,25 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
                 strcat(odgovor, " ");
                 strcat(odgovor, requestedClient->ime);
 
-
                 printf("Ovaj odgovor server salje: %s", odgovor);
 
                 if ((send_bytes = send(clientSocket, odgovor, (int)strlen(odgovor) + 1, 0)) == -1) {
                     perror("send");
                     return 1;
                 }
+
                 memset(odgovor, 0, sizeof(odgovor));
-
-
             }
-            else {
+            else 
+            {
+                
                 strcpy(odgovor, "E Ne postoji korisnik sa takvim imenom");
+
                 if ((send_bytes = send(clientSocket, odgovor, (int)strlen(odgovor) + 1, 0)) == -1) {
                     perror("send");
                     return 1;
                 }
+                
                 memset(odgovor, 0, sizeof(odgovor));
             }
 
@@ -148,8 +257,11 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
         }
         else {
             //kod koji prosledjuje poruku
-           // size_t arrayLength = sizeof(clients) / sizeof(clients[0]);
+            EnterCriticalSection(&hashmap_lock);
             client* requestedClient = search(poruka.ime, hashArray);
+            LeaveCriticalSection(&hashmap_lock);
+
+
             if (requestedClient != NULL)
             {
                 strcat(odgovor, "P Klijent ");
@@ -171,6 +283,7 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
             else
             {
                 strcpy(odgovor, "Ne postoji taj klijent");
+
                 if ((send_bytes = send(clientSocket, odgovor, (int)strlen(odgovor) + 1, 0)) == -1) {
                     perror("send");
                     return 1;
@@ -183,9 +296,6 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
 
         }
     }
-
-
-
 
     return 0;
 }
@@ -201,9 +311,10 @@ int  main(void)
     // variable used to store function return value
     int iResult;
     // Buffer used for storing incoming data
-    char recvbuf[DEFAULT_BUFLEN];
+    //char recvbuf[DEFAULT_BUFLEN];
 
     DWORD threadId;
+    DWORD threadId2;
 
     if (InitializeWindowsSockets() == false)
     {
@@ -270,11 +381,20 @@ int  main(void)
 
     printf("Server initialized, waiting for clients.\n");
 
+    HANDLE exit = CreateThread(NULL, 0, exit_function, 0, 0, &threadId2);
 
-    while (1)
+    std::vector<HANDLE> threads;
+    InitializeCriticalSection(&hashmap_lock);
+
+
+    while (isWorking)
     {
         struct sockaddr_in clientAddress;
         socklen_t addressLength = sizeof(clientAddress);
+
+        if (NonBlockingSocket(listenSocket, 1, 0) == 0) {
+            continue;
+        }
 
         clientSocket = accept(listenSocket, (struct sockaddr*)&clientAddress, &addressLength);
 
@@ -312,77 +432,27 @@ int  main(void)
             closesocket(clientSocket);
             continue;
         }
+
+        threads.push_back(clientThread);
+
     }
 
-
-    /* do
-     {
-         // Wait for clients and accept client connections.
-         // Returning value is acceptedSocket used for further
-         // Client<->Server communication. This version of
-         // server will handle only one client.
-
-
-         acceptedSocket = accept(listenSocket, NULL, NULL);//soket od klijenta koji se trenutno konektovao
-
-
-
-         if (acceptedSocket == INVALID_SOCKET)
-         {
-             printf("accept failed with error: %d\n", WSAGetLastError());
-             closesocket(listenSocket);
-             WSACleanup();
-             return 1;
-         }
-
-        do
-         {
-             // Receive data until the client shuts down the connection
-             iResult = recv(acceptedSocket, recvbuf, DEFAULT_BUFLEN, 0);
-             if (iResult > 0)
-             {
-                 printf("Message received from client: %s.\n", recvbuf);
-             }
-             else if (iResult == 0)
-             {
-                 // connection was closed gracefully
-                 printf("Connection with client closed.\n");
-                 closesocket(acceptedSocket);
-             }
-             else
-             {
-                 // there was an error during recv
-                 printf("recv failed with error: %d\n", WSAGetLastError());
-                 closesocket(acceptedSocket);
-             }
-         } while (iResult > 0);
-
-         // here is where server shutdown loguc could be placed
-
-     } while (1);*/
-
-     // shutdown the connection since we're done
-
-    iResult = shutdown(clientSocket, SD_SEND);
-    if (iResult == SOCKET_ERROR)
-    {
-        printf("shutdown failed with error: %d\n", WSAGetLastError());
-        closesocket(clientSocket);
-        WSACleanup();
-        return 1;
+    for (auto& handle : threads) {
+        CloseHandle(handle);
     }
 
-    for (int i = 0; i < SIZE; i++) {
-        if (hashArray[i] != NULL) {
-            free(hashArray[i]);
-            hashArray[i] = NULL;
-        }
-    }
+    threads.clear();
 
+    GracefullyShutdown(exit);
+
+    DeleteCriticalSection(&hashmap_lock);
+
+    Sleep(2001);
 
     closesocket(listenSocket);
     closesocket(clientSocket);
     WSACleanup();
+
 
     return 0;
 }
