@@ -1,8 +1,5 @@
 #include "HashServer.h"
 
-client* dummyItem;
-client* item;
-
 int hashCode(char* key) {
     int hash = 0;
     for (int i = 0; i < strlen(key); i++) {
@@ -26,7 +23,7 @@ client* search(char* key, client* array[]) {
     return NULL;
 }
 
-/*void insert(klijent* item) {
+void insert(client* item, client* hashArray[]) {
     int hashIndex = hashCode(item->ime);
 
     while (hashArray[hashIndex] != NULL && strcmp(hashArray[hashIndex]->ime, item->ime) != 0) {
@@ -34,27 +31,18 @@ client* search(char* key, client* array[]) {
         hashIndex %= SIZE;
     }
     hashArray[hashIndex] = item;
-}*/
-
-client* clientDelete(char* key, client* hashArray[]) {
-    int hashIndex = hashCode(key);
-
-    while (hashArray[hashIndex] != NULL) {
-
-        if (strcmp(hashArray[hashIndex]->ime, key) == 0) {
-            client* temp = hashArray[hashIndex];
-            hashArray[hashIndex] = dummyItem;
-            return temp;
-        }
-
-        ++hashIndex;
-        hashIndex %= SIZE;
-    }
-
-    return NULL;
 }
-/*
-void display() {
+
+void clientDelete(client* hashArray[], SOCKET clientSocket) {
+    for (int i = 0; i < SIZE; i++) {
+        if (hashArray[i] != NULL && hashArray[i]->socket == clientSocket) {
+            hashArray[i] = NULL;
+            break;
+        }
+    }
+}
+
+void display(client* hashArray[]) {
     int i = 0;
 
     for (i = 0; i < SIZE; i++) {
@@ -66,4 +54,4 @@ void display() {
     }
 
     printf("\n");
-}*/
+}

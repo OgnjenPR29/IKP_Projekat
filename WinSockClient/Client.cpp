@@ -1,28 +1,34 @@
 #include "Header.h"
-#include <vector>
 
-char regName[20];
-HANDLE mutex;
+char regName[NAME_SIZE];
 klijent* hashArray[SIZE];
 bool isWorking = true;
 
+int count1 = 0;
+int count2 = 0;
+
 CRITICAL_SECTION hashmap_lock;
-CRITICAL_SECTION server_socket_lock;
-CRITICAL_SECTION client_socket_lock;
+CRITICAL_SECTION count1_lock;
+CRITICAL_SECTION count2_lock;
 
-klijent* search(char* key) {
-    int hashIndex = hashCode(key);
+void GracefullyShutdown(HANDLE a, HANDLE b, HANDLE c) {
 
-    while (hashArray[hashIndex] != NULL) {
-
-        if (strcmp(hashArray[hashIndex]->ime, key) == 0)
-            return hashArray[hashIndex];
-
-        ++hashIndex;
-        hashIndex %= SIZE;
+    //ocistimo hash
+    for (int i = 0; i < SIZE; i++) {
+        if (hashArray[i] != NULL) {
+            free(hashArray[i]);
+            hashArray[i] = NULL;
+        }
     }
 
-    return NULL;
+    //zatvorimo handlove
+    CloseHandle(a);
+    CloseHandle(b);
+    CloseHandle(c);
+    printf("Cleaning up..");
+
+
+
 }
 
 //kada se direktno konektujes ovde primas poruke od tih klijenata
@@ -34,7 +40,7 @@ DWORD WINAPI client_IConnect_recv_function(LPVOID lpParam) {
 
     while (isWorking) {
         
-        if (NonBlockingSocket(clientSocket, 2, 0) == 0) {
+        if (NonBlockingSocket(clientSocket, 1, 0) == 0) {
             continue;
         }
         
@@ -58,37 +64,35 @@ DWORD WINAPI client_IConnect_recv_function(LPVOID lpParam) {
     char clientName[DEFAULT_BUFLEN];
 
     EnterCriticalSection(&hashmap_lock);
-    for (int i = 0; i < SIZE; i++) {
-        if (hashArray[i] != NULL && hashArray[i]->soket == clientSocket) {
-            strcpy(clientName, hashArray[i]->ime);
-            hashArray[i] = NULL;
-            break;
-        }
-    }
+    clientDelete(hashArray, clientSocket, clientName);
     LeaveCriticalSection(&hashmap_lock);
 
     printf("\nRemoved client %s from hashmap.\n", clientName);
 
     //cleanup
     closesocket(clientSocket);
+
+    EnterCriticalSection(&count1_lock);
+    count1 = count1 - 1;
+    LeaveCriticalSection(&count1_lock);
+
     return 0;
 
 }
 
-//ovde se ide kad se primi od servera port i ip za direktnu komunikaciju -ovde ide hash mapa
+//ovde se ide kad se primi od servera port i ip za direktnu komunikaciju
 DWORD WINAPI connect_to_client_function(LPVOID lpParam) {
 
     int iResult;
     DWORD threadId;
     
-    zaKonekciju* poruka = (zaKonekciju*)lpParam;
+    zaKonekciju* poruka = (zaKonekciju*)lpParam; 
     
     char ip[INET_ADDRSTRLEN];
     int port = poruka->port;
 
     strcpy(ip, poruka->ip);
     
-    //printf("\nUsao je u konekciju: ip: %s i port %d\n", ip, port);
 
     SOCKET connectSocket = INVALID_SOCKET;
     connectSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -114,6 +118,8 @@ DWORD WINAPI connect_to_client_function(LPVOID lpParam) {
         WSACleanup();
     }
 
+    printf("\nSuccessfully connected to %s!\n", poruka->ime);
+
     //saljemo nase ime da bi klijent znao sa kim komunicira i da bi mogao da ispise ko mu salje poruke
     iResult = send(connectSocket, regName, (int)strlen(regName) + 1, 0);
     if (iResult == SOCKET_ERROR)
@@ -128,7 +134,7 @@ DWORD WINAPI connect_to_client_function(LPVOID lpParam) {
 
     //upis u niz ili hash set
 
-    char name[20];
+    char name[NAME_SIZE];
     klijent* item = (klijent*)malloc(sizeof(klijent));
     if (item == NULL) {
         printf("\nFailed to allocate memory for item.\n");
@@ -149,6 +155,13 @@ DWORD WINAPI connect_to_client_function(LPVOID lpParam) {
     LeaveCriticalSection(&hashmap_lock);
 
     HANDLE recvThread = CreateThread(NULL, 0, client_IConnect_recv_function, item, 0, &threadId);
+    if (recvThread != NULL)
+    {
+        EnterCriticalSection(&count1_lock);
+        count1++;
+        LeaveCriticalSection(&count1_lock);
+    }
+
     CloseHandle(recvThread);
 
     return 0;
@@ -160,16 +173,16 @@ DWORD WINAPI input_thread_function(LPVOID lpParam) {
     int n;
     int recv_bytes;
     bool direktno;
-    char pomocna[2];
-    char provera[20];
-    char str1[20];
-    char str2[250];
+    char pomocna[2];//pomocna samo kupi flag direktna ili ne
+    char provera[NAME_SIZE];
+    char imeKlijenta[NAME_SIZE];
+    char tekstPoruke[TEXT_SIZE];
     struct message poruka;
 
     while (isWorking) {
 
         printf("\nUnesite sa kim zelite da komunicirate ('server' ukoliko zelite sa serverom, 'STOP' za gasenje app): ");
-        scanf(" %19%s", &provera);
+        scanf(" %20s", &provera);
 
         if (strcmp(provera, "STOP") == 0) {
             isWorking = false;
@@ -184,7 +197,7 @@ DWORD WINAPI input_thread_function(LPVOID lpParam) {
                 while (true) {
 
                     printf("Unesite koji tip komunikacije zelite D-direktno P-preko servera: ");
-                    scanf(" %2%s", &pomocna);
+                    scanf(" %2s", &pomocna);
 
                     if (strcmp(pomocna,"D") == 0 || strcmp(pomocna,"d") == 0) {
                         direktno = 1;
@@ -200,15 +213,15 @@ DWORD WINAPI input_thread_function(LPVOID lpParam) {
                 }
 
                printf("Unesite ime klijenta sa kim zelite da komunicirate: ");
-                scanf(" %19%s%n", str1, &n);
-                str1[n] = '\0';
+                scanf(" %20s%n", imeKlijenta, &n);
+                imeKlijenta[n] = '\0';
 
                 if (direktno == 1) {
 
-                    //treba proveriti da li to sto je u str1 postoji u nasoj hashmapi i ako postoji - greska
+                    //treba proveriti da li to sto je u imeKlijenta postoji u nasoj hashmapi i ako postoji - greska
 
                     EnterCriticalSection(&hashmap_lock);
-                    klijent* kl = search(str1);
+                    klijent* kl = search(imeKlijenta, hashArray);
                     LeaveCriticalSection(&hashmap_lock);
 
                     if (kl != NULL) {
@@ -216,22 +229,23 @@ DWORD WINAPI input_thread_function(LPVOID lpParam) {
                         break;
                     }
 
-                    strcpy(str2, "Posalji mi soket");
-                    //printf("\nOvo se salje serveru: %s %s", str1, str2);
+                    strcpy(tekstPoruke, "Posalji mi soket");
+                    //printf("\nOvo se salje serveru: %s %s", imeKlijenta, tekstPoruke);
                 }
 
                 else {
 
                     printf("\nUnesite tekst poruke(do 250 karaktera): ");
-                    scanf(" %249[^\n]%n", str2, &n);
-                    str2[n] = '\0';
-                   // printf("\nOvo se salje serveru: %s %s", str1, str2);
+                    scanf(" %250[^\n]%n", tekstPoruke, &n);
+                    tekstPoruke[n] = '\0';
+                    //printf("%s", tekstPoruke);
+                   // printf("\nOvo se salje serveru: %s %s", imeKlijenta, tekstPoruke);
 
                 }
 
                 poruka.direktna = direktno;
-                strcpy(poruka.ime, str1);
-                strcpy(poruka.tekst, str2);
+                strcpy(poruka.ime, imeKlijenta);
+                strcpy(poruka.tekst, tekstPoruke);
 
 
                 int iResult = send(connectSocket, (const char*)&poruka, sizeof(poruka), 0);
@@ -250,7 +264,7 @@ DWORD WINAPI input_thread_function(LPVOID lpParam) {
         else {
 
             char mess[300];
-            char temp[250];
+            char temp[TEXT_SIZE];
             int v;
 
             strcpy(mess, "Klijent ");
@@ -260,7 +274,7 @@ DWORD WINAPI input_thread_function(LPVOID lpParam) {
             //proci kroz hash mapu i izvuci klijenta sa kojim zelimo da komuniciramo ukoliko ne postoji baciti continue
 
             EnterCriticalSection(&hashmap_lock);
-            klijent* k = search(provera);
+            klijent* k = search(provera,hashArray);
             LeaveCriticalSection(&hashmap_lock);
 
             if (k == NULL) {
@@ -269,7 +283,7 @@ DWORD WINAPI input_thread_function(LPVOID lpParam) {
             }
 
             printf("\nUnesite poruku(do 250 karaktera): ");
-            scanf(" %249[^\n]%n", temp, &v);
+            scanf(" %250[^\n]%n", temp, &v);
             temp[v] = '\0';
 
             strcat(mess, temp);
@@ -292,7 +306,7 @@ DWORD WINAPI input_thread_function(LPVOID lpParam) {
 
 }
 
-//za primanje poruka od servera proveriti jos jednom recieve 
+//za primanje poruka od servera
 DWORD WINAPI recv_thread_function(LPVOID lpParam) {
 
     SOCKET servSocket = *(SOCKET*)lpParam;
@@ -301,12 +315,13 @@ DWORD WINAPI recv_thread_function(LPVOID lpParam) {
 
     std::vector<HANDLE> connectThreads;
 
+    int recv_bytes;
+    char buff[1024];
+
     while (isWorking) {
 
-        int recv_bytes;
-        char buff[1024];
 
-        if (NonBlockingSocket(servSocket, 2, 0) == 0) {
+        if (NonBlockingSocket(servSocket, 1, 0) == 0) {
             continue;
         }
 
@@ -326,7 +341,7 @@ DWORD WINAPI recv_thread_function(LPVOID lpParam) {
             char type;
             char ip[INET_ADDRSTRLEN];
             int port;
-            char name[20];
+            char name[NAME_SIZE];
 
             token = strtok(buff, " ");
             type = token[0];
@@ -384,7 +399,7 @@ DWORD WINAPI recv_function_for_client(LPVOID lpParam) {
 
     while (isWorking) {
 
-        if (NonBlockingSocket(clientSocket, 2, 0) == 0) {
+        if (NonBlockingSocket(clientSocket, 1, 0) == 0) {
             continue;
         }
 
@@ -407,24 +422,23 @@ DWORD WINAPI recv_function_for_client(LPVOID lpParam) {
     char clientName[DEFAULT_BUFLEN];
 
     EnterCriticalSection(&hashmap_lock);
-    for (int i = 0; i < SIZE; i++) {
-        if (hashArray[i] != NULL && hashArray[i]->soket == clientSocket) {
-            strcpy(clientName, hashArray[i]->ime);
-            hashArray[i] = NULL;
-            break;
-        }
-    }
+    clientDelete(hashArray, clientSocket, clientName);
     LeaveCriticalSection(&hashmap_lock);
 
     printf("\nRemoved client %s from hashmap.\n", clientName);
 
     //cleanup
     closesocket(clientSocket);
+    
+    EnterCriticalSection(&count2_lock);
+    count2 = count2 - 1;
+    LeaveCriticalSection(&count2_lock);
+
     return 0;
 
 }
 
-//tred za listen -ovde ide hash mapa 
+//tred za listen  
 DWORD WINAPI connection_thread_function(LPVOID lpParam) {
 
     SOCKET listenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -470,7 +484,7 @@ DWORD WINAPI connection_thread_function(LPVOID lpParam) {
             return 1;
         }
        
-        char name[20];
+        char name[NAME_SIZE];
 
         if (NonBlockingSocket(connectSocket, 2, 0) == 0) {
             continue;
@@ -508,6 +522,10 @@ DWORD WINAPI connection_thread_function(LPVOID lpParam) {
             closesocket(connectSocket);
             return 1;
         }
+        EnterCriticalSection(&count2_lock);
+        count2++;
+        LeaveCriticalSection(&count2_lock);
+
         communication_thread_handles.push_back(communication_thread_handle);
 
     }
@@ -522,25 +540,6 @@ DWORD WINAPI connection_thread_function(LPVOID lpParam) {
     return 0;
 }
 
-void GracefullyShutdown(HANDLE a, HANDLE b, HANDLE c) {
-
-    //ocistimo hash
-    for (int i = 0; i < SIZE; i++) {
-        if (hashArray[i] != NULL) {
-            free(hashArray[i]);
-            hashArray[i] = NULL;
-        }
-    }
-
-    //zatvorimo handlove
-    CloseHandle(a);
-    CloseHandle(b);
-    CloseHandle(c);
-    printf("Usao ovde");
-
-
-
-}
 
 
 int __cdecl main() 
@@ -553,11 +552,11 @@ int __cdecl main()
 
     int n;
     int iResult;
-    char messageToSend[20];
-    ConnectMessage message;
+    char messageToSend[NAME_SIZE];
+    ConnectMessage message; //za registraciju poruka
 
     printf("Unesite ime za registraciju(MAX 19 karaktera): ");
-    scanf(" %19s%n", messageToSend, &n);
+    scanf(" %20s%n", messageToSend, &n);
     messageToSend[n] = '\0';
 
     strcpy(message.clientName, messageToSend);
@@ -600,7 +599,7 @@ int __cdecl main()
         WSACleanup();
     }
  
-    //ovde salje ime za rregistraciju i port
+    //ovde salje da bi se konektovali na server
     iResult = send( connectSocket, (const char*)&message, sizeof(ConnectMessage), 0);
 
     if (iResult == SOCKET_ERROR)
@@ -654,6 +653,8 @@ int __cdecl main()
     printf("Bytes Sent: %ld\n", iResult);
 
     InitializeCriticalSection(&hashmap_lock);
+    InitializeCriticalSection(&count1_lock);
+    InitializeCriticalSection(&count2_lock);
 
     //za slanje poruka
     HANDLE consoleThread = CreateThread(NULL, 0, input_thread_function, &connectSocket, 0, &threadId1);
@@ -688,9 +689,18 @@ int __cdecl main()
     WaitForSingleObject(recvServerThread, INFINITE);
     WaitForSingleObject(listenThread, INFINITE);
     
+    while (count1 != 0 && count2 != 0) {
+
+    }
+
+    printf("Wait..");
+    Sleep(2000);
+
     GracefullyShutdown(consoleThread, recvServerThread, listenThread);
 
     DeleteCriticalSection(&hashmap_lock);
+    DeleteCriticalSection(&count1_lock);
+    DeleteCriticalSection(&count2_lock);
 
     Sleep(2001);
 

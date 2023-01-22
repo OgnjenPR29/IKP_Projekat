@@ -9,7 +9,10 @@
 #include <stdio.h>
 #include <conio.h>
 #include "Hash.h"
+#include <vector>
 
+#define NAME_SIZE 21
+#define TEXT_SIZE 251
 #define DEFAULT_BUFLEN 512
 #define DEFAULT_PORT 27016
 
@@ -17,21 +20,21 @@
 struct message {
 
     bool direktna;
-    char ime[20];
-    char tekst[250];
+    char ime[NAME_SIZE];
+    char tekst[TEXT_SIZE];
 
 };
 
 typedef struct {
     int listenPort;
-    char clientName[20];
+    char clientName[NAME_SIZE];
 }ConnectMessage;
 
 struct zaKonekciju {
 
     char ip[INET_ADDRSTRLEN];
     int port;
-    char ime[20];
+    char ime[NAME_SIZE];
 
 };
 

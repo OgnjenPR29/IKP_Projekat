@@ -21,7 +21,7 @@ typedef struct {
 }klijent;
 
 int hashCode(char* key);
-//klijent* search(char* key,klijent* hashArray[]);
+klijent* search(char* key,klijent* hashArray[]);
 void insert(klijent* item, klijent* hashArray[]);
-klijent* clientDelete(char* key, klijent* hashArray[]);
+void clientDelete(klijent* hashArray[], SOCKET s, char clientName[]);
 void display(klijent* hashArray[]);
