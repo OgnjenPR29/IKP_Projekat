@@ -1,13 +1,4 @@
-﻿#include <ws2tcpip.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <sys/types.h>
-#include "HashServer.h"
-#include <vector>
-#include <thread>
-
-int num_clients = 0;
+﻿#include "HashServer.h"
 
 client* hashArray[SIZE];
 
@@ -33,7 +24,7 @@ void GracefullyShutdown(HANDLE a) {
 
     CloseHandle(a);
 
-    printf("Usao ovde");
+    printf("Cleaning up..");
 
 }
 
@@ -44,23 +35,25 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
     int flag = 0;
     int send_bytes;
 
-    struct client klijent;
-    struct message poruka;
-    ThreadArgs* argumenti = (ThreadArgs*)lpParam;
+    struct client klijent;//struktura koja se cuva u mapi
+    struct message zahtev; //zahtev koji server prima
+    ThreadArgs* argumenti = (ThreadArgs*)lpParam; //argumenti prosledjeni threadu
 
-    struct ConnectMessage firstRecieve;
+    struct ConnectMessage firstRecieve;//poruka koju server dobija prvo, vezana za registraciju
 
     char p[10];
-    char currIme[20];
+    char currIme[NAME_SIZE];
 
     SOCKET clientSocket = argumenti->socket;
     char* ip = argumenti->ip;
+
+    //promenljive koje se vracaju klijentu u zavisnosti da li je ime koje je poslao pri registraciji vec zauzeto
     char good[5] = "GOOD";
     char bad[5] = "BAD";
 
     while (flag == 0 && isWorking) {
 
-        if (NonBlockingSocket(clientSocket, 2, 0) == 0) {
+        if (NonBlockingSocket(clientSocket, 1, 0) == 0) {
             continue;
         }
 
@@ -72,7 +65,7 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
             client* proveri = search(firstRecieve.clientName, hashArray);
             LeaveCriticalSection(&hashmap_lock);
 
-            if (proveri == NULL) {
+            if (proveri == NULL && firstRecieve.clientName != "server") {
                 iResult = send(clientSocket, good, (int)strlen(good) + 1, 0);
                 printf("Registrovan client: %s.\n", firstRecieve.clientName);
 
@@ -87,13 +80,7 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
             printf("Connection with client closed.\n");
 
             EnterCriticalSection(&hashmap_lock);
-            for (int i = 0; i < SIZE; i++) {
-                if (hashArray[i] != NULL && hashArray[i]->socket == clientSocket) {
-                    //strcpy(clientName, hashArray[i]->ime);
-                    hashArray[i] = NULL;
-                    break;
-                }
-            }
+            clientDelete(hashArray,clientSocket);
             LeaveCriticalSection(&hashmap_lock);
 
             printf("Client removed.\n");
@@ -107,13 +94,7 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
             printf("recv failed with error: %d\n", WSAGetLastError());
 
             EnterCriticalSection(&hashmap_lock);
-            for (int i = 0; i < SIZE; i++) {
-                if (hashArray[i] != NULL && hashArray[i]->socket == clientSocket) {
-                    //strcpy(clientName, hashArray[i]->ime);
-                    hashArray[i] = NULL;
-                    break;
-                }
-            }
+            clientDelete(hashArray, clientSocket);
             LeaveCriticalSection(&hashmap_lock);
 
             printf("Client removed.\n");
@@ -143,6 +124,7 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
         item->socket = clientSocket;
         item->port = klijent.port;
         strcpy(item->ip, klijent.ip);
+
         int hashIndex = hashCode(klijent.ime);
 
         EnterCriticalSection(&hashmap_lock);
@@ -158,11 +140,11 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
     }
     while (isWorking) {
 
-        if (NonBlockingSocket(clientSocket, 2, 0) == 0) {
+        if (NonBlockingSocket(clientSocket, 1, 0) == 0) {
             continue;
         }
 
-        int iResult = recv(clientSocket, (char*)&poruka, sizeof(struct message), 0);
+        int iResult = recv(clientSocket, (char*)&zahtev, sizeof(struct message), 0);
 
         char odgovor[50];
         memset(odgovor, 0, sizeof(odgovor));
@@ -170,8 +152,7 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
 
         if (iResult > 0)
         {
-            printf("\nOvo je server primio: %d %s %s\n", poruka.direktna, poruka.ime, poruka.tekst);
-            //printf("Message received from client: %s.\n", poruka.tekst);
+            printf("\nOvo je server primio: %d %s %s\n", zahtev.direktna, zahtev.ime, zahtev.tekst);
         }
         else if (iResult == 0)
         {
@@ -179,13 +160,7 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
             printf("Connection with client closed.\n");
 
             EnterCriticalSection(&hashmap_lock);
-            for (int i = 0; i < SIZE; i++) {
-                if (hashArray[i] != NULL && hashArray[i]->socket == clientSocket) {
-                    //strcpy(clientName, hashArray[i]->ime);
-                    hashArray[i] = NULL;
-                    break;
-                }
-            }
+            clientDelete(hashArray, clientSocket);
             LeaveCriticalSection(&hashmap_lock);
 
             printf("Client removed.\n");
@@ -200,13 +175,7 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
             printf("recv failed with error: %d\n", WSAGetLastError());
 
             EnterCriticalSection(&hashmap_lock);
-            for (int i = 0; i < SIZE; i++) {
-                if (hashArray[i] != NULL && hashArray[i]->socket == clientSocket) {
-                    //strcpy(clientName, hashArray[i]->ime);
-                    hashArray[i] = NULL;
-                    break;
-                }
-            }
+            clientDelete(hashArray, clientSocket);
             LeaveCriticalSection(&hashmap_lock);
 
             printf("Client removed.\n");
@@ -215,10 +184,10 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
             return 1;
         }
 
-        if (poruka.direktna) {
+        if (zahtev.direktna) {
             //kod koji salje soket
             EnterCriticalSection(&hashmap_lock);
-            client* requestedClient = search(poruka.ime, hashArray);
+            client* requestedClient = search(zahtev.ime, hashArray);
             LeaveCriticalSection(&hashmap_lock);
 
             if (requestedClient != NULL)
@@ -258,7 +227,7 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
         else {
             //kod koji prosledjuje poruku
             EnterCriticalSection(&hashmap_lock);
-            client* requestedClient = search(poruka.ime, hashArray);
+            client* requestedClient = search(zahtev.ime, hashArray);
             LeaveCriticalSection(&hashmap_lock);
 
 
@@ -267,7 +236,7 @@ DWORD WINAPI clientHandler(LPVOID lpParam)
                 strcat(odgovor, "P Klijent ");
                 strcat(odgovor, currIme);//registrovano ime
                 strcat(odgovor, " salje poruku: ");
-                strcat(odgovor, poruka.tekst);
+                strcat(odgovor, zahtev.tekst);
 
 
                 printf("Ovaj odgovor server salje: %s", odgovor);
@@ -443,6 +412,9 @@ int  main(void)
 
     threads.clear();
 
+    printf("Wait..");
+    Sleep(2001);
+
     GracefullyShutdown(exit);
 
     DeleteCriticalSection(&hashmap_lock);
@@ -457,14 +429,3 @@ int  main(void)
     return 0;
 }
 
-bool InitializeWindowsSockets()
-{
-    WSADATA wsaData;
-
-    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
-    {
-        printf("WSAStartup failed with error: %d\n", WSAGetLastError());
-        return false;
-    }
-    return true;
-}

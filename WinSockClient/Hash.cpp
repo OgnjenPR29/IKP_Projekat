@@ -1,6 +1,5 @@
 #include "Hash.h"
 
-klijent* dummyItem;
 klijent* item;
 
 int hashCode(char* key) {
@@ -11,7 +10,7 @@ int hashCode(char* key) {
     return hash % SIZE;
 }
 
-/*klijent* search(char* key, klijent* hashArray[]) {
+klijent* search(char* key, klijent* hashArray[]) {
     int hashIndex = hashCode(key);
 
     while (hashArray[hashIndex] != NULL) {
@@ -24,9 +23,9 @@ int hashCode(char* key) {
     }
 
     return NULL;
-}*/
+}
 
-/*void insert(klijent* item, klijent* hashArray[]) {
+void insert(klijent* item, klijent* hashArray[]) {
     int hashIndex = hashCode(item->ime);
 
     while (hashArray[hashIndex] != NULL && strcmp(hashArray[hashIndex]->ime, item->ime) != 0) {
@@ -36,22 +35,14 @@ int hashCode(char* key) {
     hashArray[hashIndex] = item;
 }
 
-klijent* clientDelete(char* key, klijent* hashArray[]) {
-    int hashIndex = hashCode(key);
-
-    while (hashArray[hashIndex] != NULL) {
-
-        if (strcmp(hashArray[hashIndex]->ime, key) == 0) {
-            klijent* temp = hashArray[hashIndex];
-            hashArray[hashIndex] = dummyItem;
-            return temp;
+void clientDelete(klijent* hashArray[], SOCKET clientSocket, char clientName[]) {
+    for (int i = 0; i < SIZE; i++) {
+        if (hashArray[i] != NULL && hashArray[i]->soket == clientSocket) {
+            strcpy(clientName, hashArray[i]->ime);
+            hashArray[i] = NULL;
+            break;
         }
-
-        ++hashIndex;
-        hashIndex %= SIZE;
     }
-
-    return NULL;
 }
 
 void display(klijent* hashArray[]) {
@@ -66,4 +57,4 @@ void display(klijent* hashArray[]) {
     }
 
     printf("\n");
-}*/
+}
